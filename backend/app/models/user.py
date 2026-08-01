@@ -44,4 +44,4 @@ class User(Base):
 
 
 for role in UserRole:
-    print(f"models/user.py UserRole: {role.value}")
+    # print(f"models/user.py UserRole: {role.value}")

@@ -11,9 +11,9 @@ class AuthService:
         self.user_repository = user_repository or UserRepository()
 
     def register_user(self, db: Session, user_data: UserCreate) -> User | None:
-        print(f"services/auth_service.py Registering new user with email: {user_data.email}")
+        # print(f"services/auth_service.py Registering new user with email: {user_data.email}")
         if self.user_repository.get_by_email(db, str(user_data.email)):
-            print("services/auth_service.py User with this email already exists")
+            # print("services/auth_service.py User with this email already exists")
             return None
 
         user = User(
@@ -22,14 +22,14 @@ class AuthService:
             password=hash_password(user_data.password),
             role=user_data.role,
         )
-        print(f"services/auth_service.py User registered successfully: {user.full_name}")
+        # print(f"services/auth_service.py User registered successfully: {user.full_name}")
         return self.user_repository.create(db, user)
 
     def authenticate_user(self, db: Session, email: str, password: str) -> User | None:
-        print(f"services/auth_service.py Authenticating user with email: {email}")
+        # print(f"services/auth_service.py Authenticating user with email: {email}")
         user = self.user_repository.get_by_email(db, email)
         if not user or not verify_password(password, user.password):
-            print("services/auth_service.py Authentication failed: Invalid email or password")
+            # print("services/auth_service.py Authentication failed: Invalid email or password")
             return None
-        print(f"services/auth_service.py User authenticated successfully: {user.full_name}")
+        # print(f"services/auth_service.py User authenticated successfully: {user.full_name}")
         return user

@@ -1,4 +1,4 @@
-print('app/main.py Starting FastAPI application...')
+# print('app/main.py Starting FastAPI application...')
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

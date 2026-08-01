@@ -12,7 +12,7 @@ class GroqService:
         self.model = "llama-3.1-8b-instant"
 
     def format_issue(self, raw_title: str, raw_description: str) -> dict:
-        print(f"services/llm_service.py Formatting issue with title: {raw_title}")
+        # print(f"services/llm_service.py Formatting issue with title: {raw_title}")
         prompt = f"""
 You are an expert QA engineer. Analyze the following raw bug report and format it into a professional, structured JSON object.
 Raw Title: {raw_title}
@@ -32,18 +32,18 @@ Output ONLY valid JSON in the exact format: {{"title": "...", "description": "..
             response_format={"type": "json_object"}
         )
         try:
-            print(f"services/llm_service.py Formatted issue: {response.choices[0].message.content}")
+            # print(f"services/llm_service.py Formatted issue: {response.choices[0].message.content}")
             return json.loads(response.choices[0].message.content)
         except Exception:
-            print("services/llm_service.py Failed to format issue, returning defaults")
+            # print("services/llm_service.py Failed to format issue, returning defaults")
             return {"title": raw_title, "description": raw_description, "priority": "Medium"}
 
 
 
     def summarize_timeline(self, recent_issues: list[dict]) -> dict:
-        print(f"services/llm_service.py Summarizing timeline for {len(recent_issues)} recent issues")
+        # print(f"services/llm_service.py Summarizing timeline for {len(recent_issues)} recent issues")
         if not recent_issues:
-            print("services/llm_service.py No recent issues to summarize, returning default summary")
+            # print("services/llm_service.py No recent issues to summarize, returning default summary")
             return {"summary": "No recent activity."}
             
         issues_text = "\n".join([f"- [{i['priority']}] {i['title']} ({i['status']})" for i in recent_issues])
@@ -63,8 +63,8 @@ Output ONLY valid JSON in the exact format: {{"summary": "your short summary her
             response_format={"type": "json_object"}
         )
         try:
-            print(f"services/llm_service.py Timeline summary: {response.choices[0].message.content}")
+            # print(f"services/llm_service.py Timeline summary: {response.choices[0].message.content}")
             return json.loads(response.choices[0].message.content)
         except Exception:
-            print("services/llm_service.py Failed to summarize timeline, returning default summary")
+            # print("services/llm_service.py Failed to summarize timeline, returning default summary")
             return {"summary": "Unable to generate summary at this time."}

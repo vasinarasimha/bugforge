@@ -6,7 +6,7 @@ from app.models.user import UserRole
 
 
 class UserCreate(BaseModel):
-    print('schemas/auth.py UserCreate model initialized')
+    # print('schemas/auth.py UserCreate model initialized')
     full_name: str = Field(min_length=2, max_length=120)
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
@@ -14,13 +14,13 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    print('schemas/auth.py UserLogin model initialized')
+    # print('schemas/auth.py UserLogin model initialized')
     email: EmailStr
     password: str = Field(min_length=1)
 
 
 class UserResponse(BaseModel):
-    print('schemas/auth.py UserResponse model initialized')
+    # print('schemas/auth.py UserResponse model initialized')
     id: int
     full_name: str
     email: EmailStr
@@ -31,7 +31,7 @@ class UserResponse(BaseModel):
 
 
 class Token(BaseModel):
-    print('schemas/auth.py Token model initialized')
+    # print('schemas/auth.py Token model initialized')
     access_token: str
     token_type: str = "bearer"
     user: UserResponse

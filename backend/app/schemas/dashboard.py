@@ -5,7 +5,7 @@ from app.schemas.project import ProjectResponse
 
 
 class DashboardStatistics(BaseModel):
-    print('schemas/dashboard.py DashboardStatistics model initialized')
+    # print('schemas/dashboard.py DashboardStatistics model initialized')
     total_projects: int
     total_reported_issues: int
     total_in_progress: int
