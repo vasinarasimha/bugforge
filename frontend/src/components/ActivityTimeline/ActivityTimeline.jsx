@@ -1,0 +1,3 @@
+export default function ActivityTimeline({ issues = [] }) {
+  return <section className="panel-card activity-panel"><div className="panel-heading"><div><h2>Recent Activity</h2><p>Latest issues from your workspace</p></div></div><div className="activity-timeline">{issues.length ? issues.map((issue) => <div className="activity-item" key={issue.id}><div className="activity-icon text-bg-danger"><i className="bi bi-bug-fill" /></div><div><p>Issue “{issue.title}” reported</p><span>{new Date(issue.created_at).toLocaleDateString()}</span></div></div>) : <p className="text-muted">No recent activity.</p>}</div></section>
+}
