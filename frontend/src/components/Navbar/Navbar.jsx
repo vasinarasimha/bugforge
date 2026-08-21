@@ -12,7 +12,7 @@ export default function Navbar({ title, onMenu }) {
           className="btn btn-light border d-lg-none"
           onClick={onMenu}
           aria-label="Open menu"
-          style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-secondary)', borderRadius: 'var(--r-sm)', width: 36, height: 36, placeItems: 'center' }}
+          style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-secondary)', borderRadius: 'var(--r-sm)', width: 36, height: 36, display: 'grid', placeItems: 'center' }}
         >
           <i className="bi bi-list fs-5" />
         </button>

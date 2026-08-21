@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { getIssues } from '../../services/issueService'
 import IssueTable from '../../components/IssueTable/IssueTable'
 import StatCard from '../../components/StatCard/StatCard'
 
 export default function DeveloperDashboard() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [issues, setIssues] = useState([])
   const [error, setError] = useState('')
@@ -33,9 +34,9 @@ export default function DeveloperDashboard() {
     <div className="role-developer">
       <section className="welcome-banner role-banner">
         <div>
-          <p className="eyebrow">Developer Board</p>
+          {/* <p className="eyebrow">Developer Board</p> */}
           <h2>Let's build, {firstName} 💻</h2>
-          <p>Track the bugs assigned to you and update their status.</p>
+          <p>Track the defects assigned to you and update their status.</p>
         </div>
         <Link to="/issues" className="btn btn-primary">
           <i className="bi bi-list-check" /> View All Issues
@@ -55,7 +56,7 @@ export default function DeveloperDashboard() {
             <p>Issues currently assigned to you</p>
           </div>
         </div>
-        <IssueTable issues={issues} />
+        <IssueTable issues={issues} canDelete={false} onView={(issue) => navigate('/issues', { state: { editIssue: issue } })} />
       </section>
     </div>
   )

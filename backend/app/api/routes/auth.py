@@ -40,3 +40,29 @@ def login(credentials: UserLogin, db: Annotated[Session, Depends(get_db)]) -> To
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: Annotated[User, Depends(get_current_user)]) -> User:
     return current_user
+
+@router.get("/users")
+def get_users(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    search: str = "",
+    limit: int = 100,
+    offset: int = 0
+):
+    from sqlalchemy import select
+    stmt = select(User).where(User.is_active == True)
+    if search:
+        stmt = stmt.where(User.full_name.ilike(f"%{search}%"))
+    stmt = stmt.limit(limit).offset(offset)
+    users = db.scalars(stmt).all()
+    
+    return {
+        "data": [
+            {
+                "id": u.id,
+                "full_name": u.full_name,
+                "email": u.email,
+                "roles": [{"name": r.name} for r in getattr(u, 'roles', [])]
+            } for u in users
+        ]
+    }

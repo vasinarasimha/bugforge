@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import require_role
 from app.api.routes.issues import serialize as issue_serialize
 from app.api.routes.projects import serialize as project_serialize
 from app.core.database import get_db
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 @router.get("/stats")
 async def admin_stats(
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    _: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
 ):
     users = list(db.scalars(select(User)).all())
     issues = IssueService().list(db)

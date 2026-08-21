@@ -1,8 +1,32 @@
-from app.models.user import User, UserRole
-
-__all__ = ["User", "UserRole"]
-from app.models.issue import Issue
-from app.models.project import Project
+from app.models.issue import Issue, IssueStatus, IssuePriority, IssueSeverity
+from app.models.project import Project, ProjectMember
 from app.models.user import User
+from app.models.role import Role, Permission, user_roles, role_permissions
 
-__all__ = ["User", "Project", "Issue"]
+from app.models.label import IssueLabel, issue_label_mapping
+from app.models.history import IssueHistory
+from app.models.comment import IssueComment
+from app.models.sprint import Sprint
+from app.models.attachment import IssueAttachment
+from app.models.sprint import Sprint
+
+__all__ = [
+    "User",
+    "Project",
+    "ProjectMember",
+    "Issue",
+    "IssueStatus",
+    "IssuePriority",
+    "IssueSeverity",
+    "Role",
+    "Permission",
+    "user_roles",
+    "role_permissions",
+    
+    "IssueLabel",
+    "issue_label_mapping",
+    "IssueHistory",
+    "IssueComment",
+    "Sprint",
+]
+

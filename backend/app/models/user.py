@@ -10,14 +10,15 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.issue import Issue
     from app.models.project import Project
-
+    from app.models.collaboration import ActivityLog, Attachment, Comment
 
 class UserRole(str, enum.Enum):
     ADMIN = "Admin"
     DEVELOPER = "Developer"
     QA = "QA"
     REPORTER = "Reporter"
-
+    PROJECT_MANAGER = "Project Manager"
+    TEAM_LEADER = "Team Leader"
 
 class User(Base):
     __tablename__ = "users"
@@ -25,23 +26,18 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     full_name: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
-    password: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(
-        Enum(
-            UserRole,
-            name="user_role",
-            values_callable=lambda enum_type: [role.value for role in enum_type],
-        ),
-        nullable=False,
-        default=UserRole.REPORTER,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    projects: Mapped[list["Project"]] = relationship(back_populates="creator")
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    job_title: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    roles: Mapped[list["Role"]] = relationship(secondary="user_roles", back_populates="users")
+    projects: Mapped[list["Project"]] = relationship(back_populates="creator", foreign_keys="Project.created_by")
     reported_issues: Mapped[list["Issue"]] = relationship(foreign_keys="Issue.reporter_id", back_populates="reporter")
     assigned_issues: Mapped[list["Issue"]] = relationship(foreign_keys="Issue.assigned_to", back_populates="assignee")
 
-
 for role in UserRole:
-    # print(f"models/user.py UserRole: {role.value}")
+    print(f"models/user.py UserRole: {role.value}")

@@ -59,7 +59,7 @@ export default function RegisterPage() {
             </h2>
             <p>
               Join product teams that want clear issue ownership, faster resolution, and
-              better release rhythm. BugForge gives your team one space for bugs, projects,
+              better release rhythm. BugForge gives your team one space for defects, projects,
               and collaboration.
             </p>
             <div className="visual-stats">

@@ -6,6 +6,7 @@ import RegisterPage from './pages/Auth/RegisterPage'
 import DashboardPage from './pages/Dashboard/DashboardPage'
 import ProjectsPage from './pages/Projects/ProjectsPage'
 import ReportedIssuesPage from './pages/Issues/ReportedIssuesPage'
+import SprintPlanningPage from './pages/Sprints/SprintPlanningPage'
 import DashboardLayout from './layouts/DashboardLayout'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/issues" element={<ReportedIssuesPage />} />
+          <Route path="/sprints" element={<SprintPlanningPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
