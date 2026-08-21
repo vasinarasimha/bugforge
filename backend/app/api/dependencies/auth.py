@@ -29,3 +29,15 @@ def get_current_user(
     if user is None:
         raise unauthorized
     return user
+
+
+def require_role(allowed_roles: list[str]):
+    def role_checker(current_user: User = Depends(get_current_user)):
+        user_roles = [r.name for r in current_user.roles]
+        if not any(role in allowed_roles for role in user_roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to perform this action"
+            )
+        return current_user
+    return role_checker

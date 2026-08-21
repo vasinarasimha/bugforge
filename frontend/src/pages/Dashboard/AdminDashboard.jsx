@@ -1,26 +1,17 @@
 import { useEffect, useState } from 'react'
 import { getAdminStats } from '../../services/dashboardService'
-import { summarizeTimeline } from '../../services/aiService'
 import ProjectTable from '../../components/ProjectTable/ProjectTable'
 import ActivityTimeline from '../../components/ActivityTimeline/ActivityTimeline'
 import StatCard from '../../components/StatCard/StatCard'
 
 export default function AdminDashboard() {
+  const navigate = useNavigate()
   const [stats, setStats] = useState(null)
   const [error, setError] = useState('')
-  const [aiSummary, setAiSummary] = useState(null)
-  const [aiLoading, setAiLoading] = useState(false)
 
   useEffect(() => {
     getAdminStats()
-      .then(({ data }) => {
-        setStats(data)
-        setAiLoading(true)
-        summarizeTimeline({ recent_issues: data.recent_issues })
-          .then((res) => setAiSummary(res.data.summary))
-          .catch(() => setAiSummary("Unable to load AI Insights."))
-          .finally(() => setAiLoading(false))
-      })
+      .then(({ data }) => setStats(data))
       .catch(() => setError('Unable to load admin statistics'))
   }, [])
 
@@ -38,7 +29,7 @@ export default function AdminDashboard() {
     <div className="role-admin">
       <section className="welcome-banner role-banner">
         <div>
-          <p className="eyebrow">Admin Overview</p>
+          {/* <p className="eyebrow">Admin Overview</p> */}
           <h2>System Control Center</h2>
           <p>Monitor system health, user distribution, and overall progress.</p>
         </div>
@@ -46,22 +37,6 @@ export default function AdminDashboard() {
 
       <section className="stats-grid mb-4">
         {statCards.map((s) => <StatCard key={s.label} stat={s} />)}
-      </section>
-
-      <section className="mb-4" style={{ animation: 'fadeSlideUp .5s ease .15s both' }}>
-        <div className="alert d-flex align-items-center mb-0" style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-main)', borderRadius: '12px', padding: '16px 20px' }}>
-          <i className="bi bi-robot fs-4 me-3" style={{ color: 'var(--tone-info)' }} />
-          <div>
-            <h6 className="mb-1 fw-bold" style={{ color: 'var(--tone-info)' }}>✨ AI Insights</h6>
-            <p className="mb-0 text-muted" style={{ fontSize: '0.9rem', lineHeight: '1.4' }}>
-              {aiLoading ? (
-                <><span className="spinner-border spinner-border-sm me-2"/> Analyzing recent activity...</>
-              ) : (
-                aiSummary
-              )}
-            </p>
-          </div>
-        </div>
       </section>
 
       <section className="content-grid">
@@ -72,7 +47,7 @@ export default function AdminDashboard() {
               <p>Latest active workspaces</p>
             </div>
           </div>
-          <ProjectTable projects={stats.latest_projects} />
+          <ProjectTable projects={stats.latest_projects} onView={(p) => navigate('/projects', { state: { editProject: p } })} />
         </div>
         <div className="panel-card" style={{ padding: '22px' }}>
           <div className="panel-heading">

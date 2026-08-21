@@ -12,18 +12,22 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
 
-  if (isLoading) return <p className="page-status">Loading session…</p>
-  if (user) return <Navigate to="/dashboard" replace />
+  if (isLoading)
+    return <p className="page-status">Loading session…</p>
+  if (user)
+    return <Navigate to="/dashboard" replace />
 
   const handleSubmit = async (event) => {
     event.preventDefault()
     setError('')
     setIsSubmitting(true)
     try {
+      console.log('Submitting login form:', form)
       const { data } = await login(form)
+      console.log('Login successful, response data:', data)
       signIn(data)
       setToastMessage('Login successful! Redirecting to dashboard…')
-      setTimeout(() => navigate('/dashboard', { replace: true }), 700)
+      setTimeout(() => navigate('/dashboard', { replace: true }), 0)
     } catch (requestError) {
       setError(requestError.response?.data?.detail || 'Unable to sign in. Please try again.')
     } finally {
@@ -38,10 +42,10 @@ export default function LoginPage() {
         {/* Left — visual panel */}
         <section className="login-visual">
           <div className="login-visual-copy">
-            <span className="eyebrow">BugForge</span>
+            {/* <span className="eyebrow">BugForge</span> */}
             <h2>
               Secure your ship cycle with{' '}
-              <span>smarter bug tracking</span>
+              <span>smarter defect tracking</span>
             </h2>
             <p>
               A modern workspace for engineering teams to prioritize, assign, and resolve

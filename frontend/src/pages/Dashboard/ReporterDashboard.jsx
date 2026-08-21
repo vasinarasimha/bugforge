@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { getDashboardStatistics } from '../../services/dashboardService'
@@ -9,6 +9,7 @@ import ProjectTable from '../../components/ProjectTable/ProjectTable'
 import ActivityTimeline from '../../components/ActivityTimeline/ActivityTimeline'
 
 export default function ReporterDashboard() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [dashboard, setDashboard] = useState(null)
   const [modal, setModal] = useState(null)
@@ -43,7 +44,7 @@ export default function ReporterDashboard() {
   }
 
   const stats = [
-    { label: 'My Reported Bugs', value: myIssues.length, note: 'Issues you created', icon: 'bi-bug', tone: 'danger' },
+    { label: 'My Reported Defects', value: myIssues.length, note: 'Issues you created', icon: 'bi-bug', tone: 'danger' },
     { label: 'Total Projects', value: dashboard?.total_projects || 0, note: 'Available to report in', icon: 'bi-folder2-open', tone: 'primary' },
     { label: 'Issues In Progress', value: dashboard?.total_in_progress || 0, note: 'System-wide active work', icon: 'bi-arrow-repeat', tone: 'warning' },
     { label: 'Resolved Issues', value: dashboard?.total_resolved || 0, note: 'System-wide resolved', icon: 'bi-check2-circle', tone: 'success' },
@@ -56,7 +57,7 @@ export default function ReporterDashboard() {
       {/* Welcome banner */}
       <section className="welcome-banner role-banner">
         <div>
-          <p className="eyebrow">Reporter Workspace</p>
+          {/* <p className="eyebrow">Reporter Workspace</p> */}
           <h2>Welcome back, {firstName} 👋</h2>
           <p>Track your reported issues and monitor project progress from one place.</p>
         </div>
@@ -80,13 +81,13 @@ export default function ReporterDashboard() {
             </div>
             <Link to="/projects" className="btn btn-outline-primary btn-sm">View all</Link>
           </div>
-          <ProjectTable projects={dashboard?.latest_projects} />
+          <ProjectTable projects={dashboard?.latest_projects} onView={(p) => navigate('/projects', { state: { editProject: p } })} />
         </div>
         <div className="panel-card" style={{ padding: '22px' }}>
           <div className="panel-heading">
             <div>
               <h2>My Recent Reports</h2>
-              <p>The latest bugs you've reported</p>
+              <p>The latest defects you've reported</p>
             </div>
           </div>
           <ActivityTimeline issues={myIssues.slice(0, 5)} />
@@ -105,14 +106,14 @@ export default function ReporterDashboard() {
               <div className="modal-body">
                 <input required className="form-control" placeholder="Title" value={issueForm.title} onChange={(e) => setIssueForm({ ...issueForm, title: e.target.value })} />
                 <textarea required className="form-control" placeholder="Description" value={issueForm.description} onChange={(e) => setIssueForm({ ...issueForm, description: e.target.value })} />
-                <select required className="form-select" value={issueForm.project_id} onChange={(e) => setIssueForm({ ...issueForm, project_id: e.target.value })}>
+                <select required className="if-select" value={issueForm.project_id} onChange={(e) => setIssueForm({ ...issueForm, project_id: e.target.value })}>
                   <option value="">Select project</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.project_name}</option>)}
                 </select>
-                <select className="form-select" value={issueForm.priority} onChange={(e) => setIssueForm({ ...issueForm, priority: e.target.value })}>
+                <select className="if-select" value={issueForm.priority} onChange={(e) => setIssueForm({ ...issueForm, priority: e.target.value })}>
                   {['Low', 'Medium', 'High', 'Critical'].map((v) => <option key={v}>{v}</option>)}
                 </select>
-                <select className="form-select" value={issueForm.status} onChange={(e) => setIssueForm({ ...issueForm, status: e.target.value })}>
+                <select className="if-select" value={issueForm.status} onChange={(e) => setIssueForm({ ...issueForm, status: e.target.value })}>
                   {['Open', 'In Progress', 'Resolved'].map((v) => <option key={v}>{v}</option>)}
                 </select>
               </div>

@@ -12,7 +12,8 @@ export default function HomePage() {
       {/* Minimal nav */}
       <nav className="home-nav">
         <div className="brand">
-          <img src="/logo.png" alt="BugForge Logo" style={{ height: 80, objectFit: 'contain' }} />
+          <div className="brand-dot">🔥</div>
+          BugForge
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <Link className="btn btn-outline-primary btn-sm" to="/login">Sign in</Link>
@@ -33,7 +34,7 @@ export default function HomePage() {
           </h1>
           <p>
             BugForge helps engineering, QA, and product teams turn chaos into clarity.
-            Manage bugs, monitor progress, and collaborate from one elegant workspace.
+            Manage defects, monitor progress, and collaborate from one elegant workspace.
           </p>
           <div className="hero-actions">
             <Link className="hero-button btn-primary-hero" to="/register">
@@ -50,7 +51,7 @@ export default function HomePage() {
         <div className="hero-summary-card">
           <div className="hero-summary-item">
             <strong>Why BugForge?</strong>
-            <p>Because every bug deserves fast resolution, clear ownership, and fewer distractions.</p>
+            <p>Because every defect deserves fast resolution, clear ownership, and fewer distractions.</p>
           </div>
           <div className="hero-summary-item">
             <strong>The problem we solve</strong>
@@ -58,7 +59,7 @@ export default function HomePage() {
           </div>
           <div className="hero-summary-item">
             <strong>How it helps</strong>
-            <p>Centralize bugs, prioritize what matters, and give teams one place to move forward.</p>
+            <p>Centralize defects, prioritize what matters, and give teams one place to move forward.</p>
           </div>
         </div>
       </section>
@@ -78,7 +79,7 @@ export default function HomePage() {
         <div className="feature-card feature-tertiary">
           <div className="feature-icon"><i className="bi bi-graph-up-arrow" /></div>
           <h2>Improve quality over time</h2>
-          <p>Track recurring issues, surface bottlenecks, and continuously reduce bug backlog overhead.</p>
+          <p>Track recurring issues, surface bottlenecks, and continuously reduce defect backlog overhead.</p>
         </div>
       </section>
     </main>

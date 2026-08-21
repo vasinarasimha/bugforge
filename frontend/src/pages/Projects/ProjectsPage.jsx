@@ -1,32 +1,94 @@
 import { useEffect, useState } from 'react'
 import ProjectTable from '../../components/ProjectTable/ProjectTable'
 import Modal from '../../components/Modal/Modal'
-import { createProject, deleteProject, getProjects, updateProject } from '../../services/projectService'
+import { createProject, deleteProject, getProjects, updateProject, getProjectHistory } from '../../services/projectService'
+import { getUsers } from '../../services/authService'
 import { useAuth } from '../../hooks/useAuth'
+import { useLocation } from 'react-router-dom'
 
 export default function ProjectsPage() {
   const { user } = useAuth()
+  const location = useLocation()
+
   const isAdmin = user?.role === 'Admin'
+  const userRoles = user?.roles?.map(r => r.name) || []
+  const isProjectManager = userRoles.includes('Project Manager')
+  const canEditProjects = isAdmin || isProjectManager
+  const canDeleteProjects = isAdmin  // Only Admin can delete per requirements
 
   const [projects, setProjects] = useState([])
+  const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState(null)
   const [showModal, setShowModal] = useState(false)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [historyModalProject, setHistoryModalProject] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [form, setForm] = useState({ project_name: '', description: '' })
+  const [users, setUsers] = useState([])
+  const [usersLoading, setUsersLoading] = useState(true)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyRecords, setHistoryRecords] = useState([])
+  const emptyForm = {
+    project_name: '',
+    description: '',
+    status: 'Active',
+    repository_url: '',
+    client_name: '',
+    start_date: '',
+    end_date: '',
+    budget: '',
+    tech_stack: '',
+    project_manager_id: null,
+    team_leader_id: null
+  }
+  const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState('')
 
-  const load = async () => {
-    const { data } = await getProjects()
-    setProjects(data)
+  const loadUsers = async () => {
+    try {
+      setUsersLoading(true)
+      const { data } = await getUsers('', 100, 0)
+      setUsers(data.data || [])
+    } catch (err) {
+      console.error('Failed to load users:', err)
+      setUsers([])
+    } finally {
+      setUsersLoading(false)
+    }
   }
 
-  useEffect(() => { load().catch(() => setError('Unable to load projects.')) }, [])
+  const load = async () => {
+    try {
+      const { data } = await getProjects()
+      setProjects(data)
+    } catch (err) {
+      setError('Unable to load projects.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadUsers().catch(() => setError('Unable to load users.'))
+    load().catch(() => setError('Unable to load projects.'))
+  }, [])
 
   const open = (project = null) => {
     setEditing(project)
-    setForm(project ? { project_name: project.project_name, description: project.description } : { project_name: '', description: '' })
+    setForm(project ? {
+      project_name: project.name,
+      description: project.description,
+      status: project.status || 'Active',
+      repository_url: project.repository_url || '',
+      client_name: project.client_name || '',
+      start_date: project.start_date ? project.start_date.split('T')[0] : '',
+      end_date: project.end_date ? project.end_date.split('T')[0] : '',
+      budget: project.budget || '',
+      tech_stack: project.tech_stack || '',
+      project_manager_id: project.project_manager_id || null,
+      team_leader_id: project.team_leader_id || null
+    } : emptyForm)
     setError('')
     setShowModal(true)
   }
@@ -34,7 +96,16 @@ export default function ProjectsPage() {
   const save = async (event) => {
     event.preventDefault()
     try {
-      editing ? await updateProject(editing.id, form) : await createProject(form)
+      const payload = {
+        ...form,
+        name: form.project_name,
+        key: form.project_name.substring(0, 3).toUpperCase() + Math.floor(100 + Math.random() * 900),
+        start_date: form.start_date ? new Date(form.start_date).toISOString() : null,
+        end_date: form.end_date ? new Date(form.end_date).toISOString() : null,
+        project_manager_id: form.project_manager_id || null,
+        team_leader_id: form.team_leader_id || null
+      }
+      editing ? await updateProject(editing.id, payload) : await createProject(payload)
       setShowModal(false)
       await load()
     } catch (e) {
@@ -52,6 +123,28 @@ export default function ProjectsPage() {
   }
   const cancelDelete = () => { setShowDeleteModal(false); setDeleteTarget(null) }
 
+  const viewHistory = async (project) => {
+    setHistoryModalProject(project)
+    setHistoryRecords([])
+    setHistoryLoading(true)
+    try {
+      const { data } = await getProjectHistory(project.id)
+      setHistoryRecords(data)
+    } catch (err) {
+      console.error('Failed to load project history:', err)
+      setError('Unable to load project history.')
+    } finally {
+      setHistoryLoading(false)
+    }
+    setShowHistoryModal(true)
+  }
+
+  const closeHistoryModal = () => {
+    setShowHistoryModal(false)
+    setHistoryModalProject(null)
+    setHistoryRecords([])
+  }
+
   const filtered = projects.filter((p) =>
     `${p.project_name} ${p.description}`.toLowerCase().includes(query.toLowerCase())
   )
@@ -60,11 +153,10 @@ export default function ProjectsPage() {
     <>
       <section className="page-heading" style={{ animation: 'fadeSlideUp .5s ease both' }}>
         <div>
-          <p className="eyebrow">Workspace</p>
           <h2>Projects</h2>
-          <p>Browse project health, bug volume, and open work.</p>
+          <p>Browse project health, defect volume, and open work.</p>
         </div>
-        {isAdmin && (
+        {canEditProjects && (
           <button className="btn btn-primary" onClick={() => open()}>
             <i className="bi bi-plus-lg" /> New Project
           </button>
@@ -93,30 +185,177 @@ export default function ProjectsPage() {
           </div>
         </div>
         {error && <div className="alert alert-danger">{error}</div>}
-        <ProjectTable projects={filtered} onEdit={open} onDelete={remove} canEdit={isAdmin} canDelete={isAdmin} />
-      </section>
+        {loading ? (
+            <div className="text-center py-5" style={{ animation: 'fadeSlideUp .5s ease both' }}>
+              <div className="spinner-border text-primary" role="status"></div>
+              <p className="mt-2 text-muted">Loading projects...</p>
+            </div>
+          ) : (
+            <ProjectTable
+              projects={filtered}
+              onEdit={open}
+              onDelete={remove}
+              onViewHistory={viewHistory}
+              canEdit={canEditProjects}
+              canDelete={canDeleteProjects}
+              userRoles={userRoles}
+              isAdmin={isAdmin}
+              isProjectManager={isProjectManager}
+            />
+          )}
+        </section>
 
-      {/* Edit / Create modal */}
-      {showModal && (
-        <div className="modal d-block" tabIndex="-1">
-          <div className="modal-dialog">
-            <form className="modal-content" onSubmit={save}>
+        {/* Edit / Create modal */}
+        {showModal && (
+          <div className="modal d-block" tabIndex="-1">
+            <div className="modal-dialog modal-lg">
+              <form className="modal-content" onSubmit={save}>
               <div className="modal-header">
                 <h5 className="modal-title">{editing ? 'Edit Project' : 'New Project'}</h5>
                 <button type="button" className="btn-close" onClick={() => setShowModal(false)} />
               </div>
-              <div className="modal-body">
+              <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
                 {error && <div className="alert alert-danger">{error}</div>}
-                <label className="form-label">Project Name</label>
-                <input required className="form-control" value={form.project_name} onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="e.g. Phoenix Backend" />
-                <label className="form-label" style={{ marginTop: 14 }}>Description</label>
-                <textarea className="form-control" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What is this project about?" />
+                <style>{`
+                  .required::after { content: " *"; color: red; }
+                  .form-label { font-weight: 500; font-size: 0.9rem; margin-bottom: 0.25rem; }
+                `}</style>
+
+                <div className="row mb-3">
+                  <div className="col-md-6">
+                    <label className="form-label required">Project Name</label>
+                    <input required className="form-control" value={form.project_name} onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="e.g. Phoenix Backend" />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label required">Status</label>
+                    <select required className="if-select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                      {['Active', 'Archived', 'Completed', 'On Hold'].map((v) => <option key={v}>{v}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <label className="form-label required">Description</label>
+                  <textarea required className="form-control" rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What is this project about?" />
+                </div>
+
+                <div className="row mb-3">
+                  <div className="col-md-6">
+                    <label className="form-label">Client / Customer</label>
+                    <input className="form-control" value={form.client_name} onChange={(e) => setForm({ ...form, client_name: e.target.value })} placeholder="e.g. ACME Corp" />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Repository URL</label>
+                    <input className="form-control" value={form.repository_url} onChange={(e) => setForm({ ...form, repository_url: e.target.value })} placeholder="e.g. https://github.com/..." />
+                  </div>
+                </div>
+
+                <div className="row mb-3">
+                  <div className="col-md-6">
+                    <label className="form-label">Start Date</label>
+                    <input type="date" className="form-control" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">End Date</label>
+                    <input type="date" className="form-control" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+                  </div>
+                </div>
+
+                <div className="row mb-3">
+                  <div className="col-md-6">
+                    <label className="form-label">Budget</label>
+                    <input className="form-control" value={form.budget} onChange={(e) => setForm({ ...form, budget: e.target.value })} placeholder="e.g. $50,000" />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Tech Stack</label>
+                    <input className="form-control" value={form.tech_stack} onChange={(e) => setForm({ ...form, tech_stack: e.target.value })} placeholder="e.g. React, Python" />
+                  </div>
+                </div>
+
+                {/* Project Manager Select */}
+                <div className="row mb-3">
+                  <div className="col-md-6">
+                    <label className="form-label">Project Manager</label>
+                    <select required className="if-select" value={form.project_manager_id || ''} onChange={(e) => setForm({ ...form, project_manager_id: e.target.value ? parseInt(e.target.value) : null })}>
+                        <option value="">Select Project Manager...</option>
+                        {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                      </select>
+                    {usersLoading && form.project_manager_id === null && (
+                      <div className="text-small text-muted mt-1">Loading users...</div>
+                    )}
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Team Leader</label>
+                    <select required className="if-select" value={form.team_leader_id || ''} onChange={(e) => setForm({ ...form, team_leader_id: e.target.value ? parseInt(e.target.value) : null })}>
+                        <option value="">Select Team Leader...</option>
+                        {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+                      </select>
+                    {usersLoading && form.team_leader_id === null && (
+                      <div className="text-small text-muted mt-1">Loading users...</div>
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-light" onClick={() => setShowModal(false)}>Cancel</button>
-                {isAdmin && <button className="btn btn-primary">Save</button>}
+                {canEditProjects && <button className="btn btn-primary">Save</button>}
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* History Modal */}
+      {showHistoryModal && (
+        <div className="modal d-block" tabIndex="-1">
+          <div className="modal-dialog modal-lg">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Change Log: {historyModalProject?.name}</h5>
+                <button type="button" className="btn-close" onClick={closeHistoryModal} />
+              </div>
+              <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                {historyLoading && <div class="text-center py-4">Loading history...</div>}
+                {!historyLoading && historyRecords.length === 0 && (
+                  <div class="text-center py-4 text-muted">No change history available for this project.</div>
+                )}
+                {!historyLoading && historyRecords.length > 0 && (
+                  <div class="table-responsive">
+                    <table className="table table-striped table-hover">
+                      <thead>
+                        <tr>
+                          <th>Field Changed</th>
+                          <th>Old Value</th>
+                          <th>New Value</th>
+                          <th>Changed By</th>
+                          <th>Changed At</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historyRecords.map((record) => (
+                          <tr key={record.id}>
+                            <td>
+                              <span className="badge bg-info text-wrap" style={{ maxWidth: '150px' }}>
+                                {record.field_name}
+                              </span>
+                            </td>
+                            <td>{record.old_value === null ? '<em>None</em>' : record.old_value}</td>
+                            <td>{record.new_value === null ? '<em>None</em>' : record.new_value}</td>
+                            <td>{record.user_name || 'System'}</td>
+                            <td>{new Date(record.created_at).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-outline-secondary" onClick={closeHistoryModal}>
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
