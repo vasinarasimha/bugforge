@@ -77,19 +77,25 @@ Output ONLY valid JSON in the exact format: {{"summary": "your short summary her
     def generate_resolution_assistance(self, issue: dict, similar_resolved: list[dict]) -> dict:
         if not self.client:
             return {
+                "historical_resolutions": [],
                 "investigation_areas": ["Review application logs", "Check recent code changes"],
                 "possible_causes": ["Unexpected null or undefined value"],
                 "suggested_resolution": "Review the relevant module for unhandled exceptions.",
-                "similar_defects_summary": "No clear historical match found."
+                "similar_defects_summary": "AI features disabled."
             }
+            
         similar_text = ""
         if similar_resolved:
             parts = []
             for i, s in enumerate(similar_resolved, 1):
+                comments_text = "\n    - ".join(s.get("relevant_comments", []))
                 parts.append(
-                    f"[Similar Defect {i}] {s.get('issue_key', 'N/A')}: {s.get('title', '')}\n"
+                    f"[Similar Defect {i}] {s.get('defect_id', 'N/A')}: {s.get('title', '')}\n"
+                    f"  Similarity: {s.get('similarity_score', 0)}\n"
                     f"  Description: {s.get('description', '')[:300]}\n"
-                    f"  Status: {s.get('status_name', 'Resolved')}"
+                    f"  Root Cause: {s.get('root_cause', 'N/A')}\n"
+                    f"  Resolution: {s.get('resolution', 'N/A')}\n"
+                    f"  Comments:\n    - {comments_text if comments_text else 'None'}"
                 )
             similar_text = "\n\n".join(parts)
         else:
@@ -108,9 +114,20 @@ SIMILAR HISTORICAL DEFECTS (from database):
 {similar_text}
 
 Based on the above, provide structured resolution assistance. Be specific and practical.
+Use the similar historical defects as evidence to recommend a resolution if they share the same root cause.
+DO NOT hallucinate historical defects. ONLY use the historical defects provided above. If none exist, output an empty array for historical_resolutions.
 
 Output ONLY valid JSON in this EXACT format:
 {{
+  "historical_resolutions": [
+    {{
+      "defect_id": "...",
+      "similarity_score": 0.89,
+      "root_cause": "...",
+      "resolution": "...",
+      "relevant_comments": ["..."]
+    }}
+  ],
   "investigation_areas": ["...", "..."],
   "possible_causes": ["...", "..."],
   "suggested_resolution": "...",
@@ -127,6 +144,7 @@ Output ONLY valid JSON in this EXACT format:
             return json.loads(response.choices[0].message.content)
         except Exception:
             return {
+                "historical_resolutions": [],
                 "investigation_areas": ["Review application logs", "Check recent code changes"],
                 "possible_causes": ["Unexpected null or undefined value"],
                 "suggested_resolution": "Review the relevant module for unhandled exceptions.",

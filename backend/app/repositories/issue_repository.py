@@ -1,3 +1,4 @@
+from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -38,3 +39,83 @@ class IssueRepository:
         print(f"repositories/issue_repository.py Soft-deleting issue with ID {issue.id} from the database")
         issue.is_deleted = True
         db.commit()
+
+    def find_similar(
+        self,
+        db: Session,
+        embedding: list[float],
+        exclude_issue_id: int | None = None,
+        project_id: int | None = None,
+        status_ids: list[int] | None = None,
+        similarity_threshold: float = 0.60,
+        limit: int = 10,
+    ) -> list[tuple[Issue, float]]:
+        """
+        Find similar issues using pgvector cosine distance at the database level.
+        Returns list of (Issue, similarity_score) tuples sorted by similarity descending.
+        Cosine distance = 1 - cosine_similarity, so similarity = 1 - distance.
+        """
+        cosine_distance = Issue.embedding_vector.cosine_distance(embedding)
+        max_distance = 1.0 - similarity_threshold
+
+        stmt = (
+            select(Issue, (1 - cosine_distance).label("similarity"))
+            .options(*self._options)
+            .where(
+                Issue.is_deleted == False,
+                Issue.is_active == True,
+                Issue.embedding_vector.isnot(None),
+                cosine_distance <= max_distance,
+            )
+        )
+
+        if exclude_issue_id is not None:
+            stmt = stmt.where(Issue.id != exclude_issue_id)
+        if project_id is not None:
+            stmt = stmt.where(Issue.project_id == project_id)
+        if status_ids is not None:
+            stmt = stmt.where(Issue.status_id.in_(status_ids))
+
+        stmt = stmt.order_by(cosine_distance.asc()).limit(limit)
+
+        results = db.execute(stmt).all()
+        return [(row[0], float(row[1])) for row in results]
+
+    def semantic_search(
+        self,
+        db: Session,
+        embedding: list[float],
+        exclude_issue_id: int | None = None,
+        project_id: int | None = None,
+        similarity_threshold: float = 0.60,
+        limit: int = 20,
+    ) -> list[tuple[Issue, float]]:
+        """
+        Search issues by semantic similarity to a query embedding.
+        Uses pgvector cosine distance at the database level.
+        Returns list of (Issue, similarity_score) tuples.
+        """
+        cosine_distance = Issue.embedding_vector.cosine_distance(embedding)
+        max_distance = 1.0 - similarity_threshold
+
+        stmt = (
+            select(Issue, (1 - cosine_distance).label("similarity"))
+            .options(*self._options)
+            .where(
+                Issue.is_deleted == False,
+                Issue.is_active == True,
+                Issue.embedding_vector.isnot(None),
+                cosine_distance <= max_distance,
+            )
+        )
+
+        if exclude_issue_id is not None:
+            stmt = stmt.where(Issue.id != exclude_issue_id)
+        if project_id is not None:
+            stmt = stmt.where(Issue.project_id == project_id)
+
+        stmt = stmt.order_by(cosine_distance.asc()).limit(limit)
+
+        results = db.execute(stmt).all()
+        return [(row[0], float(row[1])) for row in results]
+

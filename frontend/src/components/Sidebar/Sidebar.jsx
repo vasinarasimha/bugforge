@@ -3,6 +3,7 @@ import UserCard from '../UserCard/UserCard'
 
 const links = [
   { to: '/dashboard', icon: 'bi-grid-1x2-fill', label: 'Dashboard' },
+  { to: '/analytics', icon: 'bi-graph-up-arrow', label: 'Analytics' },
   { to: '/projects',  icon: 'bi-folder-fill',   label: 'Projects'   },
   { to: '/sprints',   icon: 'bi-clock',         label: 'Sprints'    },
   { to: '/issues',    icon: 'bi-bug-fill',       label: 'Reported Issues' },

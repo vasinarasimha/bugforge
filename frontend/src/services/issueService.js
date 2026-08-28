@@ -5,11 +5,11 @@ export const getPriorities = () => apiClient.get('/issues/priorities')
 export const getSeverities = () => apiClient.get('/issues/severities')
 export const getCategories = () => apiClient.get('/issues/categories')
 export const getModules = () => apiClient.get('/issues/modules')
-export const searchIssues = (q) => apiClient.get(`/issues/search?q=${encodeURIComponent(q)}`)
 export const createIssue = (data) => apiClient.post('/issues', data)
 export const updateIssue = (id, data) => apiClient.put(`/issues/${id}`, data)
 export const deleteIssue = (id) => apiClient.delete(`/issues/${id}`)
 export const getIssueHistory = (id) => apiClient.get(`/issues/${id}/history`)
+export const getIssue = (id) => apiClient.get(`/issues/${id}`)
 export const getIssueComments = (id) => apiClient.get(`/issues/${id}/comments`)
 export const addIssueComment = (id, data) => apiClient.post(`/issues/${id}/comments`, data)
 export const uploadFile = (file) => {
@@ -37,3 +37,16 @@ export const addIssueAttachment = (id, file) => {
 export const deleteIssueAttachment = (id, attachmentId) => apiClient.delete(`/issues/${id}/attachments/${attachmentId}`)
 export const updateIssueStatus = (id, data) => apiClient.patch(`/issues/${id}/status`, data)
 
+// ── Semantic Search & Similar Issues ──
+
+/** Search issues using a natural-language query */
+export const semanticSearch = (query, projectId = null, limit = null) =>
+    apiClient.post('/issues/semantic-search', { query, project_id: projectId, limit })
+
+/** Find similar issues for an existing issue */
+export const getSimilarIssues = (issueId, projectId = null) =>
+    apiClient.get(`/issues/${issueId}/similar`, { params: { project_id: projectId } })
+
+/** Legacy search by title+description (backward compatible) */
+export const searchIssues = (title, description, projectId = null, excludeIssueId = null) =>
+    apiClient.post('/issues/search', { title, description, project_id: projectId, exclude_issue_id: excludeIssueId })

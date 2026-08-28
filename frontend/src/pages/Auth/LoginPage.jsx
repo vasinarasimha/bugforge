@@ -8,6 +8,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { user, isLoading, signIn } = useAuth()
   const [form, setForm] = useState({ email: '', password: '' })
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
@@ -22,14 +23,12 @@ export default function LoginPage() {
     setError('')
     setIsSubmitting(true)
     try {
-      console.log('Submitting login form:', form)
       const { data } = await login(form)
-      console.log('Login successful, response data:', data)
       signIn(data)
       setToastMessage('Login successful! Redirecting to dashboard…')
       setTimeout(() => navigate('/dashboard', { replace: true }), 0)
     } catch (requestError) {
-      setError(requestError.response?.data?.detail || 'Unable to sign in. Please try again.')
+      setError(requestError.response?.data?.detail || 'Invalid email or password. Please check your credentials.')
     } finally {
       setIsSubmitting(false)
     }
@@ -42,14 +41,16 @@ export default function LoginPage() {
         {/* Left — visual panel */}
         <section className="login-visual">
           <div className="login-visual-copy">
-            {/* <span className="eyebrow">BugForge</span> */}
+            <span className="eyebrow" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 12px', background: 'rgba(37,99,235,0.1)', color: '#2563eb', borderRadius: '999px', fontSize: '0.78rem', fontWeight: 700, marginBottom: '12px' }}>
+              <i className="bi bi-shield-check" /> Enterprise Defect Intelligence
+            </span>
             <h2>
               Secure your ship cycle with{' '}
-              <span>smarter defect tracking</span>
+              <span className="gradient-text">intelligent defect tracking</span>
             </h2>
             <p>
-              A modern workspace for engineering teams to prioritize, assign, and resolve
-              issues fast. See everything from backlog to release in one polished interface.
+              A modern workspace for engineering, QA, and product teams to prioritize, assign, and resolve
+              defects with AI assistance. Monitor real-time telemetry from backlog to deployment.
             </p>
             <div className="visual-stats">
               <div>
@@ -72,37 +73,58 @@ export default function LoginPage() {
         {/* Right — form */}
         <section className="login-panel">
           <form className="auth-card" onSubmit={handleSubmit}>
-            <div style={{ textAlign: 'left', marginBottom: '24px' }}>
-              <img src="/logo.png" alt="BugForge Logo" style={{ height: 120, objectFit: 'contain' }} />
+            <div style={{ textAlign: 'left', marginBottom: '20px' }}>
+              <img src="/logo.png" alt="BugForge Logo" style={{ height: 48, objectFit: 'contain' }} />
             </div>
             <h1>Welcome back</h1>
-            <p>Sign in to your BugForge workspace.</p>
-            {error && <p className="error-message" role="alert">{error}</p>}
+            <p>Sign in to your BugForge workspace to continue.</p>
+            {error && (
+              <div className="alert alert-danger d-flex align-items-center gap-2 py-2 px-3" role="alert" style={{ borderRadius: '10px', fontSize: '0.85rem' }}>
+                <i className="bi bi-exclamation-circle-fill flex-shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
             <label>
-              <span>Email</span>
+              <span>Email Address</span>
               <input
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                placeholder="you@company.com"
+                placeholder="developer@company.com"
                 required
+                autoComplete="email"
               />
             </label>
             <label>
               <span>Password</span>
-              <input
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder="••••••••"
-                required
-              />
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  placeholder="••••••••"
+                  required
+                  autoComplete="current-password"
+                  style={{ paddingRight: '40px', width: '100%' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: 'absolute', right: '10px', background: 'none', border: 'none',
+                    cursor: 'pointer', color: '#94a3b8', padding: '4px', fontSize: '1rem'
+                  }}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  <i className={`bi ${showPassword ? 'bi-eye-slash' : 'bi-eye'}`} />
+                </button>
+              </div>
             </label>
             <button type="submit" disabled={isSubmitting}>
               {isSubmitting ? (
-                <><i className="bi bi-arrow-repeat" style={{ animation: 'spin 1s linear infinite' }} /> Signing in…</>
+                <><i className="bi bi-arrow-repeat spin" /> Signing in…</>
               ) : (
-                <>Sign in <i className="bi bi-arrow-right" /></>
+                <>Sign in to Workspace <i className="bi bi-arrow-right" /></>
               )}
             </button>
             <p className="auth-link">

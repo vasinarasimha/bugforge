@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     cors_origins: str = Field(default="http://localhost:5173,http://127.0.0.1:5173")
     groq_api_key: str = ""
 
+    # Semantic similarity thresholds (cosine similarity, 0-1)
+    similarity_threshold: float = 0.60
+    duplicate_threshold: float = 0.85
+    similar_defects_limit: int = 10
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

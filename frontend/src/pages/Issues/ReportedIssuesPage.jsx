@@ -3,7 +3,13 @@ import { useLocation } from 'react-router-dom'
 import IssueTable from '../../components/IssueTable/IssueTable'
 import Modal from '../../components/Modal/Modal'
 import IssueTimeline from '../../components/ActivityTimeline/IssueTimeline'
-import { createIssue, deleteIssue, getIssues, updateIssue, uploadFile, getStatuses, getPriorities, getSeverities, getIssueAttachments, addIssueAttachment, deleteIssueAttachment, getCategories, getModules } from '../../services/issueService'
+import { 
+  getIssues, getStatuses, getPriorities, getSeverities, getCategories, getModules,
+  createIssue, updateIssue, deleteIssue, uploadFile,
+  getIssueAttachments, addIssueAttachment, deleteIssueAttachment,
+  getIssueHistory, getIssueComments, addIssueComment, updateIssueStatus,
+  semanticSearch, getSimilarIssues, searchIssues, getIssue
+} from '../../services/issueService'
 import { getSprints } from '../../services/sprintService'
 import { getProjects } from '../../services/projectService'
 import { formatIssue, getResolutionAssistance } from '../../services/aiService'
@@ -88,10 +94,26 @@ export default function ReportedIssuesPage() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchTimeout, setSearchTimeout] = useState(null)
 
+  // Semantic search in list view
+  const [semanticQuery, setSemanticQuery] = useState('')
+  const [semanticResults, setSemanticResults] = useState([])
+  const [semanticSearchLoading, setSemanticSearchLoading] = useState(false)
+  const [searchMode, setSearchMode] = useState('keyword') // 'keyword' or 'semantic'
+
+  // Similar defects panel for detail view
+  const [detailSimilarDefects, setDetailSimilarDefects] = useState([])
+  const [detailSimilarLoading, setDetailSimilarLoading] = useState(false)
+
   // Resolution assistance state
   const [resolutionAssistanceLoading, setResolutionAssistanceLoading] = useState(false)
   const [resolutionAssistanceData, setResolutionAssistanceData] = useState(null)
   const [resolutionAssistanceError, setResolutionAssistanceError] = useState('')
+
+  // Resolve defect modal state
+  const [showResolveModal, setShowResolveModal] = useState(false)
+  const [resolveForm, setResolveForm] = useState({ root_cause: '', resolution: '', comment: '' })
+  const [resolveError, setResolveError] = useState('')
+  const [resolving, setResolving] = useState(false)
 
   
   const load = async () => {
@@ -128,41 +150,23 @@ export default function ReportedIssuesPage() {
     }
   }, [location.state, statuses.length])
 
-  // Debounced semantic search for similar defects
+  // Debounced semantic search for similar defects during creation / editing
   useEffect(() => {
-    // Clear existing timeout
-    if (searchTimeout) {
-      clearTimeout(searchTimeout)
-    }
+    if (searchTimeout) clearTimeout(searchTimeout)
 
-    // Set new timeout
     const timeout = setTimeout(async () => {
-      // Only search if we have both title and description with minimum length
       if (form.title?.trim() && form.description?.trim() &&
           form.title.trim().length > 0 && form.description.trim().length >= 20) {
         setSearchLoading(true)
         try {
-          const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/issues/search`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              title: form.title,
-              description: form.description
-            })
-          })
-
-          if (!response.ok) {
-            throw new Error('Failed to search for similar defects')
-          }
-
-          const data = await response.json()
-          // Filter for defects with similarity > 0.8 (cosine similarity)
-          // Backend returns array of objects with {issue, similarity}
-          const similar = data
-            .map(item => item.similarity > 0.8 ? item : null)
-            .filter(item => item !== null)
+          const { data } = await searchIssues(
+            form.title,
+            form.description,
+            form.project_id || null,
+            editing?.id || null
+          )
+          // Backend returns [{issue: {...}, similarity: float}]
+          const similar = data.filter(item => item.similarity >= 0.60)
           setSimilarDefects(similar)
         } catch (err) {
           console.error('Error searching for similar defects:', err)
@@ -177,14 +181,42 @@ export default function ReportedIssuesPage() {
     }, 1000)
 
     setSearchTimeout(timeout)
+    return () => { if (searchTimeout) clearTimeout(searchTimeout) }
+  }, [form.title, form.description, form.project_id, editing?.id])
 
-    // Cleanup function
-    return () => {
-      if (searchTimeout) {
-        clearTimeout(searchTimeout)
-      }
+  // Load similar defects when editing an existing issue
+  useEffect(() => {
+    if (editing?.id) {
+      setDetailSimilarLoading(true)
+      getSimilarIssues(editing.id, form.project_id || editing.project_id)
+        .then(r => setDetailSimilarDefects(r.data || []))
+        .catch(() => setDetailSimilarDefects([]))
+        .finally(() => setDetailSimilarLoading(false))
+    } else {
+      setDetailSimilarDefects([])
     }
-  }, [form.title, form.description])
+  }, [editing?.id, form.project_id, editing?.project_id])
+
+  // Debounced semantic search in list view
+  useEffect(() => {
+    if (searchMode !== 'semantic' || !semanticQuery.trim() || semanticQuery.trim().length < 3) {
+      setSemanticResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setSemanticSearchLoading(true)
+      try {
+        const projId = project ? Number(project) : null
+        const { data } = await semanticSearch(semanticQuery, projId)
+        setSemanticResults(data || [])
+      } catch {
+        setSemanticResults([])
+      } finally {
+        setSemanticSearchLoading(false)
+      }
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [semanticQuery, searchMode, project])
 
   const open = (issue = null) => {
     // Reset resolution assistance when opening a new issue or switching issues
@@ -209,6 +241,8 @@ export default function ReportedIssuesPage() {
           steps_to_reproduce: issue.steps_to_reproduce || '',
           expected_behavior: issue.expected_behavior || '',
           actual_behavior: issue.actual_behavior || '',
+          root_cause: issue.root_cause || '',
+          resolution: issue.resolution || '',
           attachment_path: issue.attachment_path || '',
           sprint_id: issue.sprint_id || ''
         }
@@ -239,12 +273,73 @@ export default function ReportedIssuesPage() {
           severity_id: matchingSeverity ? matchingSeverity.id : form.severity_id,
           steps_to_reproduce: data.steps_to_reproduce !== 'N/A' ? data.steps_to_reproduce : form.steps_to_reproduce,
           expected_behavior: data.expected_behavior !== 'N/A' ? data.expected_behavior : form.expected_behavior,
-          actual_behavior: data.actual_behavior !== 'N/A' ? data.actual_behavior : form.actual_behavior
+          actual_behavior: data.actual_behavior !== 'N/A' ? data.actual_behavior : form.actual_behavior,
+          root_cause: data.root_cause || form.root_cause,
+          resolution: data.resolution || form.resolution,
         })
       } catch (e) {
       setError("AI formatting failed.")
     } finally {
       setFormatting(false)
+    }
+  }
+
+  const openResolveModal = () => {
+    setResolveForm({
+      root_cause: form.root_cause || '',
+      resolution: form.resolution || '',
+      comment: ''
+    })
+    setResolveError('')
+    setShowResolveModal(true)
+  }
+
+  const handleConfirmResolve = async () => {
+    if (!resolveForm.root_cause?.trim()) {
+      setResolveError('Please specify the Root Cause of the defect.')
+      return
+    }
+    if (!resolveForm.resolution?.trim()) {
+      setResolveError('Please provide the Resolution details for how this issue was fixed.')
+      return
+    }
+
+    const resolvedStatus = statuses.find(s => s.name === 'Resolved')
+    if (!resolvedStatus) {
+      setResolveError('Resolved status not found in system.')
+      return
+    }
+
+    setResolving(true)
+    setResolveError('')
+    try {
+      if (editing) {
+        await updateIssueStatus(editing.id, {
+          status_id: resolvedStatus.id,
+          root_cause: resolveForm.root_cause.trim(),
+          resolution: resolveForm.resolution.trim(),
+          comment: resolveForm.comment?.trim() || undefined
+        })
+        setForm(prev => ({
+          ...prev,
+          status_id: resolvedStatus.id,
+          root_cause: resolveForm.root_cause.trim(),
+          resolution: resolveForm.resolution.trim()
+        }))
+        await load()
+      } else {
+        setForm(prev => ({
+          ...prev,
+          status_id: resolvedStatus.id,
+          root_cause: resolveForm.root_cause.trim(),
+          resolution: resolveForm.resolution.trim()
+        }))
+      }
+      setShowResolveModal(false)
+    } catch (err) {
+      setResolveError(err.response?.data?.detail || 'Failed to mark issue as resolved.')
+    } finally {
+      setResolving(false)
     }
   }
 
@@ -277,7 +372,7 @@ export default function ReportedIssuesPage() {
       // Safely get default values with fallbacks
       const defaultProjectId = allProjects[0]?.id ?? 1
       const defaultStatusId = (statuses.find(s => s.name === 'Open')?.id || statuses[0]?.id) ?? 1
-      const defaultPriorityId = (priorities.find(p => p.name === 'Medium')?.id || priorities[0]?.id) ?? 1
+      const defaultPriorityId = (priorities.find(s => s.name === 'Medium')?.id || priorities[0]?.id) ?? 1
       const defaultSeverityId = (severities.find(s => s.name === 'Medium')?.id || severities[0]?.id) ?? 1
       const defaultModuleId = modules[0]?.id ?? 1
       const defaultCategoryId = categories[0]?.id ?? 1
@@ -296,7 +391,19 @@ export default function ReportedIssuesPage() {
         category_id: form.category_id ? Number(form.category_id) : defaultCategoryId,
         sprint_id: form.sprint_id ? Number(form.sprint_id) : null,
       }
-      editing ? await updateIssue(editing.id, payload) : await createIssue(payload)
+      if (editing) {
+        await updateIssue(editing.id, payload)
+      } else {
+        // Create returns {issue, similar_issues} — handle the new response shape
+        const createRes = await createIssue(payload)
+        const createData = createRes.data
+        if (createData.similar_issues && createData.similar_issues.length > 0) {
+          setSimilarDefects(createData.similar_issues.map(s => ({
+            issue: s,
+            similarity: s.similarity_score
+          })))
+        }
+      }
       setShowForm(false)
       await load()
     } catch (e) {
@@ -619,7 +726,6 @@ export default function ReportedIssuesPage() {
           </button>
         )}
         <div style={{ flex: 1 }}>
-          {/* <p className="eyebrow">Issue Management</p> */}
           <h2>{showForm ? (editing ? 'Edit Issue' : 'New Issue') : 'Reported Issues'}</h2>
           <p>{showForm ? 'Fill in the details below to document the issue.' : 'Review and follow up on the bugs you have reported.'}</p>
         </div>
@@ -634,11 +740,36 @@ export default function ReportedIssuesPage() {
       {!showForm && (
         <section className="panel-card" style={{ animation: 'fadeSlideUp .5s ease .1s both' }}>
           <div className="issue-filters">
-            <div className="search-input" style={{ position: 'relative' }}>
+            <div className="search-input" style={{ position: 'relative', flex: 1 }}>
               <span className="input-group-text" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 }}>
-                <i className="bi bi-search" />
+                <i className={searchMode === 'semantic' ? 'bi bi-stars' : 'bi bi-search'} />
               </span>
-              <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Search by ID or title…" value={query} onChange={(e) => setQuery(e.target.value)} />
+              {searchMode === 'keyword' ? (
+                <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Search by ID or title…" value={query} onChange={(e) => setQuery(e.target.value)} />
+              ) : (
+                <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Semantic search — describe the issue in natural language…" value={semanticQuery} onChange={(e) => setSemanticQuery(e.target.value)} />
+              )}
+            </div>
+            {/* Search mode toggle */}
+            <div style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: '1.5px solid rgba(15,23,42,0.10)' }}>
+              <button
+                type="button"
+                onClick={() => { setSearchMode('keyword'); setSemanticResults([]); setSemanticQuery('') }}
+                style={{
+                  padding: '8px 14px', border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+                  background: searchMode === 'keyword' ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : '#fff',
+                  color: searchMode === 'keyword' ? '#fff' : '#64748b', transition: 'all .2s'
+                }}
+              >🔍 Keyword</button>
+              <button
+                type="button"
+                onClick={() => { setSearchMode('semantic'); setQuery('') }}
+                style={{
+                  padding: '8px 14px', border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
+                  background: searchMode === 'semantic' ? 'linear-gradient(135deg, #8b5cf6, #6366f1)' : '#fff',
+                  color: searchMode === 'semantic' ? '#fff' : '#64748b', transition: 'all .2s'
+                }}
+              >✨ Semantic</button>
             </div>
             <select className="if-select" value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="">All statuses</option>
@@ -660,7 +791,60 @@ export default function ReportedIssuesPage() {
             </div>
           </div>
           {error && <div className="alert alert-danger">{error}</div>}
-          <IssueTable issues={filtered} onEdit={open} onDelete={remove} canDelete={canDeleteIssue} />
+
+          {/* Semantic search results */}
+          {searchMode === 'semantic' && semanticQuery.trim().length >= 3 && (
+            <div style={{ padding: '16px 20px' }}>
+              {semanticSearchLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontSize: '0.88rem' }}>
+                  <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16 }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
+                  Searching semantically…
+                </div>
+              ) : semanticResults.length > 0 ? (
+                <div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '12px' }}>
+                    ✨ {semanticResults.length} Semantic Result{semanticResults.length !== 1 ? 's' : ''}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {semanticResults.map(r => (
+                      <div key={r.id}
+                        onClick={async () => { 
+                          try {
+                             const res = await getIssue(r.issue.id || r.id);
+                             if (res.data) open(res.data);
+                          } catch (e) {
+                             console.error("Failed to open similar issue", e);
+                          }
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
+                          borderRadius: '12px', border: '1px solid rgba(15,23,42,0.07)', background: '#fff',
+                          cursor: 'pointer', transition: 'all .2s'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(15,23,42,0.08)'}
+                        onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+                      >
+                        <span style={{
+                          padding: '3px 8px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700,
+                          background: r.similarity_label === 'Potential Duplicate' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
+                          color: r.similarity_label === 'Potential Duplicate' ? '#dc2626' : '#d97706'
+                        }}>{r.similarity_percent}%</span>
+                        <span style={{ fontWeight: 600, color: '#3b82f6', fontSize: '0.82rem', flexShrink: 0 }}>{r.issue_key}</span>
+                        <span style={{ flex: 1, fontWeight: 500, color: '#0f172a', fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</span>
+                        <span style={{ padding: '2px 8px', borderRadius: '6px', background: '#f1f5f9', color: '#64748b', fontSize: '0.72rem', fontWeight: 600 }}>{r.status_name}</span>
+                        <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>{r.similarity_label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: '#94a3b8', fontSize: '0.88rem' }}>No semantic matches found for "{semanticQuery}"</div>
+              )}
+            </div>
+          )}
+
+          {/* Normal keyword results */}
+          {searchMode === 'keyword' && <IssueTable issues={filtered} onEdit={open} onDelete={remove} canDelete={canDeleteIssue} />}
         </section>
       )}
 
@@ -706,22 +890,57 @@ export default function ReportedIssuesPage() {
 
           {/* Similar Defect Warning Banner */}
           {similarDefects.length > 0 && (
-            <div className="alert alert-warning" style={{ margin: '16px 0', padding: '12px 16px', borderRadius: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-                <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm0-14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" />
-                </svg>
-                <div>
-                  <strong>⚠️ Similar Defect Found:</strong>
-                  {similarDefects.map((defectItem, index) => (
-                    <div key={index} style={{ marginLeft: '8px', fontSize: '0.875rem' }}>
-                      <a href={`/${defectItem.issue.id}`} target="_blank" rel="noreferrer" style={{ color: '#dc2626', textDecoration: 'underline' }}>
-                        DEF-{defectItem.issue.issue_key}
-                      </a>
-                      (Similarity: {Math.round(defectItem.similarity * 100)}%)
+            <div style={{
+              margin: '0 0 0', padding: '16px 20px', borderRadius: '0',
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.06), rgba(239,68,68,0.04))',
+              borderBottom: '1px solid rgba(245,158,11,0.15)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '1.1rem' }}>⚠️</span>
+                <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#92400e', textTransform: 'uppercase', letterSpacing: '.03em' }}>
+                  Potential Similar Defects Found
+                </span>
+                {searchLoading && (
+                  <svg style={{ animation: 'spin 1s linear infinite', width: 14, height: 14, marginLeft: 4 }} fill="none" stroke="#d97706" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {similarDefects.map((defectItem, index) => {
+                  const item = defectItem.issue || defectItem
+                  const sim = defectItem.similarity || defectItem.similarity_score || 0
+                  const simPercent = sim > 1 ? sim : Math.round(sim * 100)
+                  const label = sim >= 0.85 ? 'Potential Duplicate' : 'Similar Defect'
+                  const isDuplicate = sim >= 0.85
+                  return (
+                    <div key={index} style={{
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                      padding: '10px 14px', borderRadius: '10px',
+                      background: '#fff', border: `1px solid ${isDuplicate ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.15)'}`,
+                    }}>
+                      <span style={{
+                        padding: '3px 10px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700,
+                        background: isDuplicate ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
+                        color: isDuplicate ? '#dc2626' : '#d97706',
+                        flexShrink: 0,
+                      }}>{simPercent}%</span>
+                      <span style={{ fontWeight: 700, color: '#3b82f6', fontSize: '0.82rem', flexShrink: 0 }}>
+                        {item.issue_key || `#${item.id}`}
+                      </span>
+                      <span style={{ flex: 1, fontWeight: 500, color: '#0f172a', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.title}
+                      </span>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: '6px',
+                        background: '#f1f5f9', color: '#64748b',
+                        fontSize: '0.72rem', fontWeight: 600, flexShrink: 0,
+                      }}>{item.status_name || 'Unknown'}</span>
+                      <span style={{
+                        fontSize: '0.72rem', fontWeight: 600, flexShrink: 0,
+                        color: isDuplicate ? '#dc2626' : '#d97706',
+                      }}>{label}</span>
                     </div>
-                  ))}
-                </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -781,8 +1000,15 @@ export default function ReportedIssuesPage() {
                         const canChangeStatus = userRoles.includes('Admin') || userRoles.includes('Project Manager');
                         if (canChangeStatus) {
                           return (
-                            <select required className="if-select" value={form.status_id || ''} onChange={e => setForm({ ...form, status_id: e.target.value })}>
-                              {/* <option value="">Select status...</option> */}
+                            <select required className="if-select" value={form.status_id || ''} onChange={e => {
+                              const nextId = e.target.value;
+                              const s = statuses.find(x => String(x.id) === String(nextId));
+                              if (s?.name === 'Resolved') {
+                                openResolveModal();
+                              } else {
+                                setForm({ ...form, status_id: nextId });
+                              }
+                            }}>
                               {statuses.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                             </select>
                           );
@@ -811,6 +1037,10 @@ export default function ReportedIssuesPage() {
                         }
 
                         const setStatusName = (name) => {
+                          if (name === 'Resolved') {
+                            openResolveModal();
+                            return;
+                          }
                           const s = statuses.find(x => x.name === name);
                           if (s) setForm({ ...form, status_id: s.id });
                         };
@@ -884,7 +1114,7 @@ export default function ReportedIssuesPage() {
                         disabled={userRoles.includes('Developer') || userRoles.includes('QA') || userRoles.includes('Reporter')}
                       >
                         <option value="">Unassigned</option>
-                        {allUsers.map(u => (
+                        {allUsers.filter(u => u.roles && u.roles.some(r => r.name === 'Developer')).map(u => (
                           <option key={u.id} value={u.id}>
                             {u.full_name}
                           </option>
@@ -919,6 +1149,50 @@ export default function ReportedIssuesPage() {
                         value={form.actual_behavior} onChange={e => setForm({ ...form, actual_behavior: e.target.value })} />
                     </FieldGroup>
                   </div>
+                  
+                  {editing && (form.root_cause || form.resolution || ['Resolved', 'Closed'].includes(statuses.find(s => String(s.id) === String(form.status_id))?.name)) && (
+                    <div style={{
+                      marginTop: '16px',
+                      padding: '16px 18px', borderRadius: '12px',
+                      background: 'linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(59,130,246,0.04) 100%)',
+                      border: '1px solid rgba(16,185,129,0.22)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                        <span style={{ fontSize: '1.1rem' }}>🛡️</span>
+                        <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#065f46' }}>Resolution Documentation</span>
+                        <span style={{
+                          marginLeft: 'auto', fontSize: '0.72rem', fontWeight: 700,
+                          padding: '2px 8px', borderRadius: '6px',
+                          background: '#d1fae5', color: '#047857'
+                        }}>
+                          {statuses.find(s => String(s.id) === String(form.status_id))?.name || 'Resolved'}
+                        </span>
+                      </div>
+                      <div className="if-grid-2">
+                        <FieldGroup label="Root Cause" hint="Technical reason for the defect">
+                          <textarea className="if-textarea" placeholder="Describe the underlying cause of the defect..." rows={3}
+                            value={form.root_cause} onChange={e => setForm({ ...form, root_cause: e.target.value })} />
+                        </FieldGroup>
+                        <FieldGroup label="Resolution Fix Details" hint="How this defect was resolved">
+                          <textarea className="if-textarea" placeholder="Describe how the defect was resolved..." rows={3}
+                            value={form.resolution} onChange={e => setForm({ ...form, resolution: e.target.value })} />
+                        </FieldGroup>
+                      </div>
+                    </div>
+                  )}
+
+                  {editing && !form.root_cause && !form.resolution && !['Resolved', 'Closed'].includes(statuses.find(s => String(s.id) === String(form.status_id))?.name) && (
+                    <div className="if-grid-2" style={{ marginTop: '16px' }}>
+                      <FieldGroup label="Root Cause (Optional)">
+                        <textarea className="if-textarea" placeholder="Describe the underlying cause of the defect..." rows={3}
+                          value={form.root_cause} onChange={e => setForm({ ...form, root_cause: e.target.value })} />
+                      </FieldGroup>
+                      <FieldGroup label="Resolution (Optional)">
+                        <textarea className="if-textarea" placeholder="Describe how the defect was resolved..." rows={3}
+                          value={form.resolution} onChange={e => setForm({ ...form, resolution: e.target.value })} />
+                      </FieldGroup>
+                    </div>
+                  )}
                 </SectionCard>
 
                 {/* Environment */}
@@ -1034,6 +1308,76 @@ export default function ReportedIssuesPage() {
             {/* ── RIGHT: Activity Timeline ── */}
             {editing && (
               <div className="if-right">
+                {/* Similar Defects Panel */}
+                {detailSimilarLoading ? (
+                  <div className="if-resolution-assistant-card" style={{ marginBottom: '16px' }}>
+                    <div className="if-resolution-assistant-header">
+                      <span className="if-resolution-assistant-icon">🔗</span>
+                      <span className="if-resolution-assistant-title">Similar Defects</span>
+                    </div>
+                    <div className="if-resolution-assistant-body" style={{ padding: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontSize: '0.85rem' }}>
+                        <svg style={{ animation: 'spin 1s linear infinite', width: 14, height: 14 }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
+                        Finding similar defects…
+                      </div>
+                    </div>
+                  </div>
+                ) : detailSimilarDefects.length > 0 ? (
+                  <div className="if-resolution-assistant-card" style={{ marginBottom: '16px' }}>
+                    <div className="if-resolution-assistant-header">
+                      <span className="if-resolution-assistant-icon">🔗</span>
+                      <span className="if-resolution-assistant-title">Similar Defects ({detailSimilarDefects.length})</span>
+                    </div>
+                    <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {detailSimilarDefects.map(sim => {
+                        const isDuplicate = sim.similarity_label === 'Potential Duplicate'
+                        return (
+                          <div key={sim.id} style={{
+                            padding: '10px 12px', borderRadius: '10px',
+                            border: `1px solid ${isDuplicate ? 'rgba(239,68,68,0.15)' : 'rgba(15,23,42,0.07)'}`,
+                            background: isDuplicate ? 'rgba(239,68,68,0.02)' : '#fff',
+                            cursor: 'pointer', transition: 'all .2s',
+                          }}
+                          onClick={async () => { 
+                            try {
+                               const res = await getIssue(sim.id);
+                               if (res.data) open(res.data);
+                            } catch (e) {
+                               console.error("Failed to open similar issue", e);
+                            }
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(15,23,42,0.06)'}
+                          onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                              <span style={{
+                                padding: '2px 8px', borderRadius: '5px', fontSize: '0.7rem', fontWeight: 700,
+                                background: isDuplicate ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
+                                color: isDuplicate ? '#dc2626' : '#d97706',
+                              }}>{sim.similarity_percent}%</span>
+                              <span style={{ fontWeight: 700, color: '#3b82f6', fontSize: '0.78rem' }}>{sim.issue_key}</span>
+                              <span style={{
+                                marginLeft: 'auto', padding: '1px 6px', borderRadius: '4px',
+                                background: '#f1f5f9', color: '#64748b', fontSize: '0.68rem', fontWeight: 600,
+                              }}>{sim.status_name}</span>
+                            </div>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 500, color: '#0f172a', lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {sim.title}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                              {sim.severity_name && <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>Severity: {sim.severity_name}</span>}
+                              {sim.priority_name && <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>Priority: {sim.priority_name}</span>}
+                            </div>
+                            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: isDuplicate ? '#dc2626' : '#d97706', marginTop: '4px' }}>
+                              {sim.similarity_label}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
                 {/* AI Resolution Assistance Card */}
                 {resolutionAssistanceLoading ? (
                   <div className="if-resolution-assistant-card" style={{ marginBottom: '24px' }}>
@@ -1067,11 +1411,38 @@ export default function ReportedIssuesPage() {
                       <span className="if-resolution-assistant-title">AI Resolution Assistance</span>
                     </div>
                     <div className="if-resolution-assistant-body">
+                      {resolutionAssistanceData.historical_resolutions && resolutionAssistanceData.historical_resolutions.length > 0 && (
+                        <div className="if-resolution-assistant-section">
+                          <h4>Historical Resolutions</h4>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {resolutionAssistanceData.historical_resolutions.map((hr, idx) => (
+                              <div key={idx} style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                  <span style={{ fontWeight: 600, color: '#3b82f6', fontSize: '0.85rem' }}>{hr.defect_id}</span>
+                                  <span style={{ fontWeight: 600, color: '#64748b', fontSize: '0.75rem' }}>Similarity: {Math.round(hr.similarity_score * 100)}%</span>
+                                </div>
+                                <div style={{ marginBottom: '6px', fontSize: '0.85rem' }}>
+                                  <strong>Root Cause:</strong> {hr.root_cause || 'N/A'}
+                                </div>
+                                <div style={{ marginBottom: '6px', fontSize: '0.85rem' }}>
+                                  <strong>Resolution:</strong> {hr.resolution || 'N/A'}
+                                </div>
+                                {hr.relevant_comments && hr.relevant_comments.length > 0 && (
+                                  <div style={{ fontSize: '0.8rem', color: '#475569', fontStyle: 'italic', background: '#fff', padding: '8px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                                    <strong>Comment:</strong> "{hr.relevant_comments[0]}"
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
                       <div className="if-resolution-assistant-section">
                         <h4>Investigation Areas</h4>
                         <ul>
                           {resolutionAssistanceData.investigation_areas.map((area, index) => (
-                            <li key={index}>• {area}</li>
+                            <li key={index}>{area}</li>
                           ))}
                         </ul>
                       </div>
@@ -1079,7 +1450,7 @@ export default function ReportedIssuesPage() {
                         <h4>Possible Causes</h4>
                         <ul>
                           {resolutionAssistanceData.possible_causes.map((cause, index) => (
-                            <li key={index}>• {cause}</li>
+                            <li key={index}>{cause}</li>
                           ))}
                         </ul>
                       </div>
@@ -1126,6 +1497,68 @@ export default function ReportedIssuesPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Resolve Defect Modal */}
+      {showResolveModal && (
+        <Modal
+          title={`Resolve Defect — ${editing?.issue_key || 'Issue'}`}
+          primaryLabel={resolving ? 'Saving Resolution…' : 'Confirm & Mark as Resolved'}
+          secondaryLabel="Cancel"
+          onPrimary={handleConfirmResolve}
+          onSecondary={() => setShowResolveModal(false)}
+          onClose={() => setShowResolveModal(false)}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <p style={{ margin: 0, fontSize: '0.88rem', color: '#475569', lineHeight: 1.5 }}>
+              Documenting the <strong>Root Cause</strong> and <strong>Resolution</strong> enables the AI assistance engine to intelligently guide future developers when similar defects arise.
+            </p>
+            
+            {resolveError && (
+              <div style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#dc2626', fontSize: '0.84rem' }}>
+                {resolveError}
+              </div>
+            )}
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, fontSize: '0.84rem', color: '#1e293b', marginBottom: '4px' }}>
+                Root Cause <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <textarea
+                className="if-textarea"
+                rows={3}
+                placeholder="Explain the underlying technical cause (e.g. Unhandled null pointer in payment callback handler)..."
+                value={resolveForm.root_cause}
+                onChange={e => setResolveForm({ ...resolveForm, root_cause: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, fontSize: '0.84rem', color: '#1e293b', marginBottom: '4px' }}>
+                Resolution Details <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <textarea
+                className="if-textarea"
+                rows={3}
+                placeholder="Describe how the defect was resolved (e.g. Added null-check guard and fallback retry logic)..."
+                value={resolveForm.resolution}
+                onChange={e => setResolveForm({ ...resolveForm, resolution: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, fontSize: '0.84rem', color: '#64748b', marginBottom: '4px' }}>
+                Resolution Comment (Optional)
+              </label>
+              <input
+                className="if-input"
+                placeholder="e.g. Fix merged into main branch under PR #142"
+                value={resolveForm.comment}
+                onChange={e => setResolveForm({ ...resolveForm, comment: e.target.value })}
+              />
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Delete confirm */}

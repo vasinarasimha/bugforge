@@ -17,9 +17,9 @@ export default function DeveloperDashboard() {
       .catch(() => setError('Unable to load developer issues'))
   }, [user.id])
 
-  const openIssues = issues.filter(i => i.status === 'Open')
-  const inProgressIssues = issues.filter(i => i.status === 'In Progress')
-  const resolvedIssues = issues.filter(i => i.status === 'Resolved')
+  const openIssues = issues.filter(i => i.status_name === 'Open')
+  const inProgressIssues = issues.filter(i => i.status_name === 'In Progress')
+  const resolvedIssues = issues.filter(i => i.status_name === 'Resolved' || i.status_name === 'Closed')
 
   const statCards = [
     { label: 'Assigned to Me', value: issues.length, note: 'Total issues on your plate', icon: 'bi-person-workspace', tone: 'primary' },
