@@ -1,17 +1,25 @@
+import logging
 from typing import Annotated
-from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, status, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import numpy as np
 
 from app.api.dependencies.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import User
 from app.models.issue import Issue, IssueStatus, IssuePriority, IssueSeverity, IssueCategory, IssueModule
-from app.schemas.issue import IssueCreate, IssueResponse, IssueUpdate, IssueStatusResponse, IssuePriorityResponse, IssueCommentCreate, IssueCommentResponse, IssueHistoryResponse, IssueSeverityResponse, IssueCategoryResponse, IssueModuleResponse
+from app.schemas.issue import (
+    IssueCreate, IssueResponse, IssueUpdate,
+    IssueStatusResponse, IssuePriorityResponse, IssueSeverityResponse,
+    IssueCategoryResponse, IssueModuleResponse,
+    IssueCommentCreate, IssueCommentResponse, IssueHistoryResponse,
+    SimilarIssueResponse, IssueCreateResponse, SemanticSearchRequest, SemanticSearchResponse,
+)
 from app.schemas.attachment import IssueAttachmentResponse
 from app.services.issue_service import IssueService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/issues", tags=["Issues"])
 service = IssueService()
@@ -73,41 +81,67 @@ async def list_categories(db: Annotated[Session, Depends(get_db)]):
 async def list_modules(db: Annotated[Session, Depends(get_db)]):
     return db.query(IssueModule).filter(IssueModule.is_active == True).all()
 
+
+# ── Semantic Search & Similarity Endpoints ──
+
+@router.post("/semantic-search", response_model=list[SemanticSearchResponse])
+async def semantic_search(
+    data: SemanticSearchRequest,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    """
+    Search issues using natural-language semantic query.
+    Returns ranked results by similarity score.
+    """
+    try:
+        results = service.semantic_search(
+            db, query=data.query, project_id=data.project_id, limit=data.limit
+        )
+        return results
+    except Exception as e:
+        logger.error(f"Semantic search failed: {e}")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Semantic search temporarily unavailable")
+
+
 class SearchRequest(BaseModel):
     title: str
     description: str
+    project_id: int | None = None
+    exclude_issue_id: int | None = None
 
 @router.post("/search", response_model=list[dict])
-async def search_issues(db: Annotated[Session, Depends(get_db)], _: Annotated[User, Depends(get_current_user)], search_request: SearchRequest):
-    from app.services.embedding_service import EmbeddingService
-    import numpy as np
+async def search_issues(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    search_request: SearchRequest,
+):
+    """
+    Search for similar issues by title and description.
+    Uses pgvector cosine similarity at the database level.
+    Backward-compatible with existing frontend usage.
+    """
+    from app.services.embedding_service import embedding_service
+
     try:
-        embedder = EmbeddingService()
-        query_vector = embedder.embed_issue(search_request.title, search_request.description)
+        embedding = embedding_service.embed_issue(search_request.title, search_request.description)
+        if embedding is None:
+            return []
+
+        results = service.find_similar_for_embedding(
+            db,
+            embedding=embedding,
+            exclude_issue_id=search_request.exclude_issue_id,
+            project_id=search_request.project_id
+        )
+        # Return in backward-compatible format: [{issue: {...}, similarity: float}]
+        return [{"issue": serialize(service.get(db, r["id"])), "similarity": r["similarity_score"]} for r in results]
     except Exception as e:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Embedding model unavailable: {e}")
+        logger.error(f"Search failed: {e}")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Search temporarily unavailable")
 
-    # Query using pgvector cosine similarity <-> operator
-    candidates = db.query(Issue).filter(Issue.embedding_vector.isnot(None), Issue.is_active == True).all()
-    q_vec = np.array(query_vector)
 
-    results = []
-    for issue in candidates:
-        try:
-            # Calculate cosine similarity: 1 - (euclidean distance / max possible distance)
-            # For normalized vectors, cosine similarity = 1 - (euclidean^2 / 2)
-            # But we'll compute a simple similarity score based on inverse distance
-            dist = float(np.linalg.norm(q_vec - np.array(issue.embedding_vector)))
-            # Convert distance to similarity score (0-1, higher is more similar)
-            # Using exponential decay: similarity = exp(-dist)
-            similarity = np.exp(-dist)
-            results.append((similarity, issue))
-        except Exception:
-            continue
-
-    results.sort(key=lambda x: x[0], reverse=True)  # Sort by similarity descending
-    # Return top 20 most similar with similarity scores
-    return [{"issue": serialize(i), "similarity": float(sim)} for sim, i in results[:20]]
+# ── CRUD Endpoints ──
 
 @router.get("", response_model=list[IssueResponse])
 async def list_issues(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
@@ -119,18 +153,40 @@ async def list_issues(db: Annotated[Session, Depends(get_db)], user: Annotated[U
 async def get_issue(issue_id: int, db: Annotated[Session, Depends(get_db)], _: Annotated[User, Depends(get_current_user)]):
     return serialize(service.get(db, issue_id))
 
-@router.post("", response_model=IssueResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=IssueCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_issue(data: IssueCreate, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
-    return serialize(service.create(db, data, user))
+    """
+    Create a new issue and return it along with any similar existing issues found.
+    The similar_issues list helps users identify potential duplicates.
+    """
+    created = service.create(db, data, user)
+    serialized = serialize(created)
+
+    # Find similar issues (graceful — never blocks creation)
+    similar_issues = []
+    try:
+        if created.embedding_vector is not None:
+            similar_issues = service.find_similar_for_embedding(
+                db,
+                embedding=list(created.embedding_vector),
+                exclude_issue_id=created.id,
+                project_id=created.project_id,
+            )
+    except Exception as e:
+        logger.error(f"Similar issue detection during creation failed: {e}")
+
+    return {"issue": serialized, "similar_issues": similar_issues}
 
 @router.put("/{issue_id}", response_model=IssueResponse)
 async def update_issue(issue_id: int, data: IssueUpdate, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     return serialize(service.update(db, issue_id, data, user))
 
 
-from pydantic import BaseModel
 class IssueStatusUpdate(BaseModel):
     status_id: int
+    root_cause: str | None = None
+    resolution: str | None = None
+    comment: str | None = None
 
 @router.patch("/{issue_id}/status", response_model=IssueResponse)
 async def update_issue_status(issue_id: int, data: IssueStatusUpdate, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
@@ -145,7 +201,24 @@ async def update_issue_status(issue_id: int, data: IssueStatusUpdate, db: Annota
             raise HTTPException(status_code=403, detail="Not authorized to update this issue status")
 
     old_status = issue.status_id
+    old_root_cause = issue.root_cause
+    old_resolution = issue.resolution
+
     issue.status_id = data.status_id
+    if data.root_cause is not None:
+        issue.root_cause = data.root_cause.strip() if isinstance(data.root_cause, str) else data.root_cause
+    if data.resolution is not None:
+        issue.resolution = data.resolution.strip() if isinstance(data.resolution, str) else data.resolution
+
+    if data.comment and data.comment.strip():
+        from app.models.comment import IssueComment
+        comment_obj = IssueComment(
+            issue_id=issue.id,
+            user_id=user.id,
+            content=data.comment.strip()
+        )
+        db.add(comment_obj)
+
     db.commit()
     db.refresh(issue)
 
@@ -168,6 +241,8 @@ async def update_issue_status(issue_id: int, data: IssueStatusUpdate, db: Annota
         reproduction_steps=issue.reproduction_steps,
         expected_behavior=issue.expected_behavior,
         actual_behavior=issue.actual_behavior,
+        root_cause=old_root_cause,
+        resolution=old_resolution,
         attachment_path=issue.attachment_path,
         sprint_id=issue.sprint_id,
         project_id=issue.project_id,
@@ -192,6 +267,31 @@ async def delete_issue(issue_id: int, db: Annotated[Session, Depends(get_db)], u
         raise HTTPException(status_code=403, detail="Not authorized to delete defects")
     service.delete(db, issue_id, user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Similar Issues Endpoint ──
+
+@router.get("/{issue_id}/similar", response_model=list[SimilarIssueResponse])
+async def get_similar_issues(
+    issue_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    project_id: int | None = Query(default=None, description="Optional: limit to specific project"),
+):
+    """
+    Find issues similar to an existing issue using semantic embedding similarity.
+    Results are filtered by project and sorted by similarity score.
+    """
+    try:
+        return service.find_similar_issues(db, issue_id, project_id=project_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Similar issues lookup failed: {e}")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Similar issue detection temporarily unavailable")
+
+
+# ── History & Comments ──
 
 def serialize_history(h):
     return {
@@ -234,6 +334,8 @@ async def create_issue_comment(issue_id: int, data: IssueCommentCreate, db: Anno
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ── Attachments ──
 
 def serialize_attachment(a):
     return {
@@ -296,5 +398,3 @@ async def delete_issue_attachment(
 ):
     service.delete_attachment(db, issue_id, attachment_id, user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-

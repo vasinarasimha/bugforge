@@ -1,37 +1,37 @@
-import os
 import logging
-from typing import List, Optional
+from typing import Optional
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
 class EmbeddingService:
     """
-    Service to generate embeddings using local all-MiniLM model.
+    Service to generate embeddings using local all-MiniLM-L6-v2 model.
     This avoids external API calls and uses local inference.
-    Optimized for low-end devices.
+    The model is loaded once (singleton) and reused for all requests.
     """
 
     def __init__(self):
-        # Try to load the lightweight all-MiniLM-L3-v2 model
         try:
             from sentence_transformers import SentenceTransformer
-            logger.info("Loading lightweight all-MiniLM-L3-v2 model...")
-            self.model = SentenceTransformer('sentence-transformers/paraphrase-MiniLM-L3-v2')
-            logger.info("all-MiniLM-L3-v2 model loaded successfully")
+            logger.info("Loading all-MiniLM-L6-v2 model...")
+            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+            logger.info("all-MiniLM-L6-v2 model loaded successfully")
         except Exception as e:
-            logger.error(f"Failed to load all-MiniLM-L3-v2 model: {e}")
+            logger.error(f"Failed to load all-MiniLM-L6-v2 model: {e}")
             self.model = None
 
-        # all-MiniLM-L3-v2 embedding dimension (matches DB column: 384)
+        # all-MiniLM-L6-v2 embedding dimension
         self.dimension = 384
 
-    def embed_text(self, text: str) -> Optional[List[float]]:
+    def embed_text(self, text: str) -> Optional[list[float]]:
         """
         Generate embedding for a single text string using local all-MiniLM model.
         Returns list of floats (dimension 384) or None if failed.
         """
-        if not text.strip():
+        if not text or not text.strip():
             return None
 
         if self.model is None:
@@ -39,17 +39,13 @@ class EmbeddingService:
             return None
 
         try:
-            # Generate embedding
             embedding = self.model.encode(text, normalize_embeddings=True)
 
-            # Ensure we have the right dimension (should be 384)
             if len(embedding) != self.dimension:
                 logger.warning(f"Expected dimension {self.dimension}, got {len(embedding)}")
-                # Truncate or pad if needed
                 if len(embedding) > self.dimension:
                     embedding = embedding[:self.dimension]
                 else:
-                    # Pad with zeros
                     padded = np.zeros(self.dimension)
                     padded[:len(embedding)] = embedding
                     embedding = padded
@@ -60,12 +56,51 @@ class EmbeddingService:
             logger.error(f"Failed to generate embedding: {e}")
             return None
 
-    def embed_issue(self, title: str, description: str) -> Optional[List[float]]:
+    def _build_issue_text(
+        self,
+        title: str,
+        description: str,
+        category: str | None = None,
+        module: str | None = None,
+        issue_type: str | None = None,
+    ) -> str:
         """
-        Generate embedding for an issue by combining title and description.
+        Build a deterministic text representation of an issue for embedding.
+        Combines the most semantically meaningful fields.
         """
-        text = f"{title}\n{description}".strip()
+        parts = []
+        if title and title.strip():
+            parts.append(f"Title: {title.strip()}")
+        if description and description.strip():
+            parts.append(f"Description: {description.strip()}")
+        if issue_type and issue_type.strip():
+            parts.append(f"Type: {issue_type.strip()}")
+        if category and category.strip():
+            parts.append(f"Category: {category.strip()}")
+        if module and module.strip():
+            parts.append(f"Module: {module.strip()}")
+        return "\n".join(parts)
+
+    def embed_issue(
+        self,
+        title: str,
+        description: str,
+        category: str | None = None,
+        module: str | None = None,
+        issue_type: str | None = None,
+    ) -> Optional[list[float]]:
+        """
+        Generate embedding for an issue by combining semantically meaningful fields.
+        """
+        text = self._build_issue_text(title, description, category, module, issue_type)
         return self.embed_text(text)
 
-# Singleton instance
+    def embed_query(self, query: str) -> Optional[list[float]]:
+        """
+        Generate embedding for a natural-language search query.
+        """
+        return self.embed_text(query)
+
+
+# Singleton instance — loaded once and reused across all requests
 embedding_service = EmbeddingService()

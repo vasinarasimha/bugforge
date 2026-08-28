@@ -4,7 +4,7 @@ import Sidebar from '../components/Sidebar/Sidebar'
 import Navbar from '../components/Navbar/Navbar'
 import { useAuth } from '../hooks/useAuth'
 
-const titles = { '/dashboard': 'Dashboard', '/projects': 'Projects', '/sprints': 'Sprints', '/issues': 'Reported Issues' }
+const titles = { '/dashboard': 'Dashboard', '/analytics': 'Analytics & Insights', '/projects': 'Projects', '/sprints': 'Sprints', '/issues': 'Reported Issues' }
 
 export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)

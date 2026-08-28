@@ -4,6 +4,7 @@ import HomePage from './pages/Home/HomePage'
 import LoginPage from './pages/Auth/LoginPage'
 import RegisterPage from './pages/Auth/RegisterPage'
 import DashboardPage from './pages/Dashboard/DashboardPage'
+import AnalyticsPage from './pages/Analytics/AnalyticsPage'
 import ProjectsPage from './pages/Projects/ProjectsPage'
 import ReportedIssuesPage from './pages/Issues/ReportedIssuesPage'
 import SprintPlanningPage from './pages/Sprints/SprintPlanningPage'
@@ -18,6 +19,7 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<DashboardLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/issues" element={<ReportedIssuesPage />} />
           <Route path="/sprints" element={<SprintPlanningPage />} />

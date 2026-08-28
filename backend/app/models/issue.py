@@ -70,6 +70,8 @@ class Issue(Base):
     reproduction_steps: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_behavior: Mapped[str | None] = mapped_column(Text, nullable=True)
     actual_behavior: Mapped[str | None] = mapped_column(Text, nullable=True)
+    root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
     attachment_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     
     sprint_id: Mapped[int | None] = mapped_column(ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True, index=True)
