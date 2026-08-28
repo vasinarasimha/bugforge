@@ -64,6 +64,23 @@ jobs:
         run: |
           PGPASSWORD=ci_password psql -h localhost -U ci_user -d bugforge_ci -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
+      - name: Diagnose Alembic migration graph and git commit
+        working-directory: backend
+        run: |
+          echo "=== 1. Current Git commit ==="
+          git rev-parse HEAD
+          echo "=== 2. Alembic heads ==="
+          python -m alembic heads
+          echo "=== 3. Alembic branches ==="
+          python -m alembic branches
+          echo "=== 4. Alembic history ==="
+          python -m alembic history --verbose
+          echo "=== 5. List migration files ==="
+          ls -la alembic/versions/
+          echo "=== 6. Confirm specific files exist ==="
+          ls -l alembic/versions/6c1e95e02210_merge_multiple_heads.py
+          ls -l alembic/versions/1ab9eeb7bf93_add_root_cause_and_resolution_to_issues.py
+
       - name: Run Alembic database migrations
         working-directory: backend
         run: |
