@@ -64,51 +64,10 @@ jobs:
         run: |
           PGPASSWORD=ci_password psql -h localhost -U ci_user -d bugforge_ci -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-      - name: DIAGNOSTIC - Inspect Alembic Graph
-        working-directory: backend
-        run: |
-          echo "=========================================="
-          echo "START ALEMBIC CI DIAGNOSTICS"
-          echo "=========================================="
-
-          echo ""
-          echo "=== CURRENT GIT COMMIT ==="
-          git rev-parse HEAD
-
-          echo ""
-          echo "=== MIGRATION FILES ==="
-          find alembic/versions -maxdepth 1 -type f -print | sort
-
-          echo ""
-          echo "=== IMPORTANT MIGRATION FILE CHECK ==="
-          ls -l alembic/versions/6c1e95e02210_merge_multiple_heads.py
-          ls -l alembic/versions/1ab9eeb7bf93_add_root_cause_and_resolution_to_issues.py
-
-          echo ""
-          echo "=== ALEMBIC HEADS ==="
-          python -m alembic heads
-
-          echo ""
-          echo "=== ALEMBIC BRANCHES ==="
-          python -m alembic branches
-
-          echo ""
-          echo "=== ALEMBIC HISTORY ==="
-          python -m alembic history --verbose
-
-          echo ""
-          echo "=========================================="
-          echo "END ALEMBIC CI DIAGNOSTICS"
-          echo "=========================================="
-
-          echo ""
-          echo "Stopping intentionally after diagnostics."
-          exit 1
-
       - name: Run Alembic database migrations
         working-directory: backend
         run: |
-          alembic upgrade head
+          alembic upgrade 1ab9eeb7bf93
 
       - name: Run backend automated tests
         working-directory: backend
