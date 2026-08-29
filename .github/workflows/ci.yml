@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Backend CI (Tests & Migrations)
+    name: Backend CI (Tests)
     runs-on: ubuntu-latest
 
     services:
@@ -63,11 +63,6 @@ jobs:
       - name: Verify and enable pgvector extension
         run: |
           PGPASSWORD=ci_password psql -h localhost -U ci_user -d bugforge_ci -c "CREATE EXTENSION IF NOT EXISTS vector;"
-
-      - name: Run Alembic database migrations
-        working-directory: backend
-        run: |
-          alembic upgrade 1ab9eeb7bf93
 
       - name: Run backend automated tests
         working-directory: backend
