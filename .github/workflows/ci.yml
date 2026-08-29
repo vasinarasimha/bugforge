@@ -59,6 +59,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+          pip install pytest pytest-asyncio httpx
 
       - name: Verify and enable pgvector extension
         run: |
