@@ -104,6 +104,33 @@ def upgrade() -> None:
         sa.UniqueConstraint('name')
     )
 
+    # Create sprint_statuses table
+    op.create_table(
+        'sprint_statuses',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('name', sa.String(length=50), nullable=False),
+        sa.Column('is_active', sa.Boolean(), nullable=False),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('name')
+    )
+
+    # Create sprints table
+    op.create_table(
+        'sprints',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('name', sa.String(length=100), nullable=False),
+        sa.Column('goal', sa.Text(), nullable=True),
+        sa.Column('start_date', sa.Date(), nullable=True),
+        sa.Column('end_date', sa.Date(), nullable=True),
+        sa.Column('status_id', sa.Integer(), nullable=False),
+        sa.Column('project_id', sa.Integer(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['status_id'], ['sprint_statuses.id']),
+        sa.PrimaryKeyConstraint('id')
+    )
+
     # Create issue table
     op.create_table(
         'issues',
@@ -281,33 +308,6 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_project_members_project_id'), 'project_members', ['project_id'], unique=False)
     op.create_index(op.f('ix_project_members_user_id'), 'project_members', ['user_id'], unique=False)
-
-    # Create sprint_statuses table
-    op.create_table(
-        'sprint_statuses',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('name', sa.String(length=50), nullable=False),
-        sa.Column('is_active', sa.Boolean(), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('name')
-    )
-
-    # Create sprints table
-    op.create_table(
-        'sprints',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('name', sa.String(length=100), nullable=False),
-        sa.Column('goal', sa.Text(), nullable=True),
-        sa.Column('start_date', sa.Date(), nullable=True),
-        sa.Column('end_date', sa.Date(), nullable=True),
-        sa.Column('status_id', sa.Integer(), nullable=False),
-        sa.Column('project_id', sa.Integer(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['status_id'], ['sprint_statuses.id']),
-        sa.PrimaryKeyConstraint('id')
-    )
 
     # Insert default data for lookup tables
     op.execute("INSERT INTO issue_statuses (name, is_active) VALUES ('Open', true), ('In Progress', true), ('Resolved', true), ('Closed', true)")
