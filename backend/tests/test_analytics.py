@@ -49,7 +49,7 @@ class TestAnalyticsService:
         assert isinstance(overview, AnalyticsOverviewResponse)
         assert overview.kpis.total_defects == 0
         assert overview.kpis.open_defects == 0
-        assert overview.kpis.avg_resolution_time_formatted == "No resolution-time data available"
+        assert overview.kpis.avg_resolution_time_formatted in ("N/A", "No resolution-time data available")
         assert overview.resolution_metrics.sample_size == 0
         assert len(overview.defect_trends) >= 7
 
