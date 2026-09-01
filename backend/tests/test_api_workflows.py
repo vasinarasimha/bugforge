@@ -142,3 +142,99 @@ class TestHealthAndDocs:
         assert "/api/analytics/overview" in response.json()["paths"]
         assert "/api/issues" in response.json()["paths"]
         assert "/api/projects" in response.json()["paths"]
+        assert "/api/issues/{issue_id}/assign" in response.json()["paths"]
+        assert "/api/issues/{issue_id}/status" in response.json()["paths"]
+
+
+class TestIssueStatusAndAssignmentAPI:
+
+    def test_update_issue_assignee_as_admin(self, mock_admin):
+        from app.api.dependencies.auth import get_current_user
+        from app.core.database import get_db
+        app.dependency_overrides[get_current_user] = lambda: mock_admin
+
+        mock_db = MagicMock()
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        try:
+            with patch("app.api.routes.issues.service") as mock_issue_svc, \
+                 patch("app.repositories.user_repository.UserRepository") as MockUserRepo, \
+                 patch("app.api.routes.issues.serialize") as mock_serialize:
+
+                mock_issue = MagicMock()
+                mock_issue.id = 5
+                mock_issue.assigned_to = 10
+                mock_issue_svc.get.return_value = mock_issue
+
+                mock_target_user = MagicMock()
+                mock_target_user.id = 10
+                MockUserRepo.return_value.get_by_id.return_value = mock_target_user
+
+                mock_serialize.return_value = {
+                    "id": 5,
+                    "issue_key": "TEST-5",
+                    "title": "Test Defect",
+                    "description": "Test description",
+                    "issue_type": "Defect",
+                    "status_id": 1,
+                    "status_name": "Open",
+                    "priority_id": 1,
+                    "priority_name": "Medium",
+                    "severity_id": 1,
+                    "severity_name": "Medium",
+                    "category_id": None,
+                    "category_name": None,
+                    "module_id": None,
+                    "module_name": None,
+                    "environment": None,
+                    "browser": None,
+                    "operating_system": None,
+                    "reproduction_steps": None,
+                    "expected_behavior": None,
+                    "actual_behavior": None,
+                    "root_cause": None,
+                    "resolution": None,
+                    "attachment_path": None,
+                    "sprint_id": None,
+                    "sprint_name": None,
+                    "project_id": 1,
+                    "project_name": "Test Project",
+                    "reporter_id": 1,
+                    "reporter_name": "Admin User",
+                    "assigned_to": 10,
+                    "assignee": "Target User",
+                    "created_at": "2026-09-01T10:00:00",
+                    "updated_at": "2026-09-01T10:00:00",
+                    "is_active": True,
+                }
+
+                response = client.patch("/api/issues/5/assign", json={"assigned_to": 10})
+                assert response.status_code == 200
+                assert response.json()["assigned_to"] == 10
+                mock_db.commit.assert_called_once()
+
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+
+    def test_update_issue_assignee_forbidden_for_developer(self, mock_developer):
+        from app.api.dependencies.auth import get_current_user
+        from app.core.database import get_db
+        app.dependency_overrides[get_current_user] = lambda: mock_developer
+
+        mock_db = MagicMock()
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        try:
+            with patch("app.api.routes.issues.service") as mock_issue_svc:
+                mock_issue = MagicMock()
+                mock_issue.id = 5
+                mock_issue_svc.get.return_value = mock_issue
+
+                response = client.patch("/api/issues/5/assign", json={"assigned_to": 10})
+                assert response.status_code == 403
+                assert "Not authorized" in response.json()["detail"]
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides.pop(get_db, None)
+

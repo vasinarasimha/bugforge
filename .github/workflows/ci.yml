@@ -35,6 +35,7 @@ jobs:
       ENVIRONMENT: test
       APP_NAME: BugForge API
       GROQ_API_KEY: dummy-groq-key-for-ci
+      HF_TOKEN: dummy-hf-token-for-ci
 
     steps:
       - name: Check out repository
@@ -65,10 +66,17 @@ jobs:
         run: |
           PGPASSWORD=ci_password psql -h localhost -U ci_user -d bugforge_ci -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
+      - name: Initialize database schema and seed data
+        working-directory: backend
+        run: |
+          python -m app.core.init_db
+
       - name: Run backend automated tests
         working-directory: backend
         run: |
           python -m pytest -v
+
+
 
   frontend:
     name: Frontend CI (Build & Validation)

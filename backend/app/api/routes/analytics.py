@@ -24,16 +24,17 @@ service = AnalyticsService()
     "/overview",
     response_model=AnalyticsOverviewResponse,
     summary="Get complete analytics overview",
-    description="Retrieve all Milestone 3 defect metrics, KPIs, breakdowns, developer workloads, and trends aggregated from the database."
+    description="Retrieve role-scoped defect metrics, KPIs, breakdowns, developer workloads, and trends aggregated from the database."
 )
 async def get_analytics_overview(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None, description="Optional: filter metrics by project ID"),
+    team_id: Optional[int] = Query(default=None, description="Optional: filter metrics by team ID"),
     days: int = Query(default=30, ge=1, le=365, description="Time range for trend calculation (days)"),
 ):
     try:
-        return service.get_overview(db, current_user, project_id=project_id, days=days)
+        return service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=days)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -50,8 +51,9 @@ async def get_kpis(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None, description="Optional project filter"),
+    team_id: Optional[int] = Query(default=None, description="Optional team filter"),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
     return overview.kpis
 
 @router.get(
@@ -63,8 +65,9 @@ async def get_severity_distribution(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
+    team_id: Optional[int] = Query(default=None),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
     return overview.severity_distribution
 
 @router.get(
@@ -76,8 +79,9 @@ async def get_category_distribution(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
+    team_id: Optional[int] = Query(default=None),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
     return overview.category_distribution
 
 @router.get(
@@ -89,8 +93,9 @@ async def get_status_distribution(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
+    team_id: Optional[int] = Query(default=None),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
     return overview.status_distribution
 
 @router.get(
@@ -102,8 +107,9 @@ async def get_developer_workload(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
+    team_id: Optional[int] = Query(default=None),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
     return overview.developer_workload
 
 @router.get(
@@ -115,9 +121,10 @@ async def get_defect_trends(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
+    team_id: Optional[int] = Query(default=None),
     days: int = Query(default=30, ge=1, le=365),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, days=days)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=days)
     return overview.defect_trends
 
 @router.get(
@@ -129,6 +136,7 @@ async def get_resolution_time_metrics(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
+    team_id: Optional[int] = Query(default=None),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
     return overview.resolution_metrics

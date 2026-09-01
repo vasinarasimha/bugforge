@@ -16,7 +16,8 @@ from app.api.routes import (
     projects_router,
     sprints_router,
     uploads_router,
-    analytics_router
+    analytics_router,
+    teams_router
 )
 try:
     from app.api.routes.ai import router as ai_router
@@ -42,6 +43,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(admin_router, prefix="/api", tags=["admin"])
+app.include_router(teams_router, prefix="/api", tags=["teams"])
 app.include_router(dashboard_router, prefix="/api", tags=["dashboard"])
 app.include_router(analytics_router, prefix="/api", tags=["analytics"])
 app.include_router(issues_router, prefix="/api", tags=["issues"])

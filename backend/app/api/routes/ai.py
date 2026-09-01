@@ -3,16 +3,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_current_user, require_role
 from app.core.database import get_db
 from app.models.user import User
 from app.models.issue import Issue, IssueStatus
 from app.models.comment import IssueComment
+from app.models.troubleshooting import TroubleshootingSession
 from app.repositories.issue_repository import IssueRepository
 from app.services.llm_service import llm_service
 from app.services.embedding_service import embedding_service
+from app.api.routes.troubleshooting import router as troubleshooting_router
+from app.schemas.qa import (
+    GenerateTestCasesRequest,
+    TestCaseGenerationResponse,
+    MissingScenariosRequest,
+    MissingScenariosResponse,
+)
 
 router = APIRouter(prefix="/ai")
+router.include_router(troubleshooting_router)
 
 class FormatIssueRequest(BaseModel):
     title: str
@@ -115,4 +124,102 @@ async def get_resolution_assistance(
 
     # Generate resolution assistance
     result = llm_service.generate_resolution_assistance(issue_dict, similar_resolved_list)
+
+    # Enhance with AI root-cause analysis data if available
+    ai_root_cause = None
+    if getattr(issue, 'ai_root_cause_session_id', None):
+        try:
+            ts = db.query(TroubleshootingSession).filter(
+                TroubleshootingSession.id == issue.ai_root_cause_session_id
+            ).first()
+            if ts and ts.root_cause:
+                ai_root_cause = {
+                    "root_cause": ts.root_cause,
+                    "confidence": ts.confidence,
+                    "evidence": ts.evidence_summary or [],
+                    "recommended_fix": ts.recommended_fix,
+                    "status": ts.status,
+                }
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to fetch AI root cause session: {e}")
+
+    result["ai_root_cause"] = ai_root_cause
     return result
+
+
+def _build_defect_context(db: Session, issue: Issue) -> dict:
+    """Helper to extract comprehensive defect context for QA AI prompts."""
+    ai_root_cause = None
+    if getattr(issue, 'ai_root_cause_session_id', None):
+        try:
+            ts = db.query(TroubleshootingSession).filter(
+                TroubleshootingSession.id == issue.ai_root_cause_session_id
+            ).first()
+            if ts and ts.root_cause:
+                ai_root_cause = ts.root_cause
+        except Exception:
+            pass
+
+    return {
+        "id": issue.id,
+        "issue_key": issue.issue_key,
+        "title": issue.title,
+        "description": issue.description,
+        "reproduction_steps": issue.reproduction_steps,
+        "expected_behavior": issue.expected_behavior,
+        "actual_behavior": issue.actual_behavior,
+        "severity_name": issue.severity.name if issue.severity else "Unknown",
+        "priority_name": issue.priority.name if issue.priority else "Unknown",
+        "status_name": issue.status.name if issue.status else "Unknown",
+        "category_name": issue.category.name if getattr(issue, 'category', None) else "General",
+        "module_name": issue.module.name if getattr(issue, 'module', None) else "General",
+        "project_name": issue.project.name if getattr(issue, 'project', None) else "General",
+        "environment": issue.environment,
+        "browser": issue.browser,
+        "operating_system": issue.operating_system,
+        "root_cause": getattr(issue, 'root_cause', None),
+        "resolution": getattr(issue, 'resolution', None),
+        "ai_root_cause": ai_root_cause,
+    }
+
+
+QA_ALLOWED_ROLES = ["Admin", "Project Manager", "Team Leader", "QA", "PM", "TL"]
+
+
+@router.post("/test-cases", response_model=TestCaseGenerationResponse)
+async def generate_test_cases(
+    req: GenerateTestCasesRequest,
+    _: Annotated[User, Depends(require_role(QA_ALLOWED_ROLES))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """
+    Generate structured, multi-perspective QA test cases for an existing defect.
+    Restricted to Admin, PM, TL, and QA roles.
+    """
+    issue_repo = IssueRepository()
+    issue = issue_repo.get(db, req.issue_id)
+    if not issue:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
+
+    defect_context = _build_defect_context(db, issue)
+    return llm_service.generate_test_cases(defect_context)
+
+
+@router.post("/missing-scenarios", response_model=MissingScenariosResponse)
+async def detect_missing_scenarios(
+    req: MissingScenariosRequest,
+    _: Annotated[User, Depends(require_role(QA_ALLOWED_ROLES))],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """
+    Analyze defect and existing test cases to identify overlooked edge cases and test coverage gaps.
+    Restricted to Admin, PM, TL, and QA roles.
+    """
+    issue_repo = IssueRepository()
+    issue = issue_repo.get(db, req.issue_id)
+    if not issue:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
+
+    defect_context = _build_defect_context(db, issue)
+    return llm_service.detect_missing_scenarios(defect_context, req.existing_test_cases)

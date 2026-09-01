@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import IssueTable from '../../components/IssueTable/IssueTable'
 import Modal from '../../components/Modal/Modal'
+import TroubleshootingModal from '../../components/TroubleshootingModal/TroubleshootingModal'
 import IssueTimeline from '../../components/ActivityTimeline/IssueTimeline'
+import AITestIntelligence from '../../components/AITestIntelligence/AITestIntelligence'
 import { 
   getIssues, getStatuses, getPriorities, getSeverities, getCategories, getModules,
   createIssue, updateIssue, deleteIssue, uploadFile,
   getIssueAttachments, addIssueAttachment, deleteIssueAttachment,
-  getIssueHistory, getIssueComments, addIssueComment, updateIssueStatus,
+  getIssueHistory, getIssueComments, addIssueComment, updateIssueStatus, updateIssueAssignee,
   semanticSearch, getSimilarIssues, searchIssues, getIssue
 } from '../../services/issueService'
 import { getSprints } from '../../services/sprintService'
@@ -54,6 +56,9 @@ export default function ReportedIssuesPage() {
   const userRole = user?.role || user?.roles?.[0]?.name || ''
   const userRoles = user?.roles?.map(r => r.name) || [userRole]
   const canDeleteIssue = userRole === 'Admin' || userRole === 'QA' || userRole === 'Project Manager'
+  const canAccessTestIntelligence = userRoles.some(r => ['Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
+  const canAssignIssues = userRoles.some(r => ['Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
+
   const BACKEND_TO_FRONTEND_ISSUE_TYPE = {
     Defect: 'Bug',
     Task: 'Task',
@@ -89,6 +94,9 @@ export default function ReportedIssuesPage() {
   const [formatting, setFormatting] = useState(false)
   const [attachments, setAttachments] = useState([])
   const [attachUploading, setAttachUploading] = useState(false)
+  const [statusUpdating, setStatusUpdating] = useState(false)
+  const [assigneeUpdating, setAssigneeUpdating] = useState(false)
+
   // Semantic search state
   const [similarDefects, setSimilarDefects] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
@@ -109,16 +117,25 @@ export default function ReportedIssuesPage() {
   const [resolutionAssistanceData, setResolutionAssistanceData] = useState(null)
   const [resolutionAssistanceError, setResolutionAssistanceError] = useState('')
 
+  // AI Test Intelligence state
+  const [showTestIntelligence, setShowTestIntelligence] = useState(false)
+
+  // Troubleshooting modal state
+  const [showTroubleshootingModal, setShowTroubleshootingModal] = useState(false)
+  const [troubleshootingPayload, setTroubleshootingPayload] = useState(null)
+
   // Resolve defect modal state
   const [showResolveModal, setShowResolveModal] = useState(false)
   const [resolveForm, setResolveForm] = useState({ root_cause: '', resolution: '', comment: '' })
   const [resolveError, setResolveError] = useState('')
   const [resolving, setResolving] = useState(false)
 
-  
+  const isBug = form.issue_type === 'Bug' || form.issue_type === 'Defect'
+
   const load = async () => {
     const [issueResult, statusResult, priorityResult, severityResult, categoryResult, moduleResult, projResult, userResult] = await Promise.all([
       getIssues(), getStatuses(), getPriorities(), getSeverities(), getCategories(), getModules(), getProjects('', 1000, 0), getUsers('', 1000, 0)
+
     ])
     setIssues(issueResult.data)
     setStatuses(statusResult.data)
@@ -219,10 +236,11 @@ export default function ReportedIssuesPage() {
   }, [semanticQuery, searchMode, project])
 
   const open = (issue = null) => {
-    // Reset resolution assistance when opening a new issue or switching issues
+    // Reset resolution assistance and QA intelligence when opening a new issue or switching issues
     setResolutionAssistanceLoading(false)
     setResolutionAssistanceData(null)
     setResolutionAssistanceError('')
+    setShowTestIntelligence(false)
     setEditing(issue)
     setForm(issue
       ? {
@@ -261,23 +279,26 @@ export default function ReportedIssuesPage() {
   const handleAIFormat = async () => {
     if (!form.title && !form.description) return
     setFormatting(true)
-      try {
-        const { data } = await formatIssue({ title: form.title, description: form.description })
-        const matchingPriority = priorities.find(p => p.name === data.priority)
-        const matchingSeverity = severities.find(s => s.name === data.severity)
-        setForm({
-          ...form,
-          title: data.title || form.title,
-          description: data.description || form.description,
-          priority_id: matchingPriority ? matchingPriority.id : form.priority_id,
-          severity_id: matchingSeverity ? matchingSeverity.id : form.severity_id,
-          steps_to_reproduce: data.steps_to_reproduce !== 'N/A' ? data.steps_to_reproduce : form.steps_to_reproduce,
-          expected_behavior: data.expected_behavior !== 'N/A' ? data.expected_behavior : form.expected_behavior,
-          actual_behavior: data.actual_behavior !== 'N/A' ? data.actual_behavior : form.actual_behavior,
-          root_cause: data.root_cause || form.root_cause,
-          resolution: data.resolution || form.resolution,
-        })
-      } catch (e) {
+    setError('')
+    try {
+      const { data } = await formatIssue({ title: form.title, description: form.description })
+      const matchingPriority = priorities.find(p => p.name === data.priority)
+      const matchingSeverity = severities.find(s => s.name === data.severity)
+      setForm({
+        ...form,
+        title: data.title || form.title,
+        description: data.description || form.description,
+        priority_id: matchingPriority ? matchingPriority.id : form.priority_id,
+        severity_id: matchingSeverity ? matchingSeverity.id : form.severity_id,
+        steps_to_reproduce: (data.steps_to_reproduce && data.steps_to_reproduce !== 'N/A') ? data.steps_to_reproduce : form.steps_to_reproduce,
+        expected_behavior: (data.expected_behavior && data.expected_behavior !== 'N/A') ? data.expected_behavior : form.expected_behavior,
+        actual_behavior: (data.actual_behavior && data.actual_behavior !== 'N/A') ? data.actual_behavior : form.actual_behavior,
+        environment: (data.environment && data.environment !== 'N/A') ? data.environment : form.environment,
+        browser: (data.browser && data.browser !== 'N/A') ? data.browser : form.browser,
+        root_cause: data.root_cause || form.root_cause,
+        resolution: data.resolution || form.resolution,
+      })
+    } catch (e) {
       setError("AI formatting failed.")
     } finally {
       setFormatting(false)
@@ -326,6 +347,13 @@ export default function ReportedIssuesPage() {
           root_cause: resolveForm.root_cause.trim(),
           resolution: resolveForm.resolution.trim()
         }))
+        setEditing(prev => ({
+          ...prev,
+          status_id: resolvedStatus.id,
+          status_name: resolvedStatus.name,
+          root_cause: resolveForm.root_cause.trim(),
+          resolution: resolveForm.resolution.trim()
+        }))
         await load()
       } else {
         setForm(prev => ({
@@ -340,6 +368,67 @@ export default function ReportedIssuesPage() {
       setResolveError(err.response?.data?.detail || 'Failed to mark issue as resolved.')
     } finally {
       setResolving(false)
+    }
+  }
+
+  const handleImmediateStatusChange = async (nextStatusIdOrName) => {
+    let targetStatus = null
+    if (typeof nextStatusIdOrName === 'string' && isNaN(Number(nextStatusIdOrName))) {
+      if (nextStatusIdOrName === 'Resolved') {
+        openResolveModal()
+        return
+      }
+      targetStatus = statuses.find(x => x.name === nextStatusIdOrName)
+    } else {
+      targetStatus = statuses.find(x => String(x.id) === String(nextStatusIdOrName))
+      if (targetStatus?.name === 'Resolved') {
+        openResolveModal()
+        return
+      }
+    }
+
+    if (!targetStatus) return
+
+    if (!editing) {
+      setForm(prev => ({ ...prev, status_id: targetStatus.id }))
+      return
+    }
+
+    setStatusUpdating(true)
+    setError('')
+    try {
+      await updateIssueStatus(editing.id, { status_id: targetStatus.id })
+      setForm(prev => ({ ...prev, status_id: targetStatus.id }))
+      setEditing(prev => ({ ...prev, status_id: targetStatus.id, status_name: targetStatus.name }))
+      setIssues(prev => prev.map(iss => iss.id === editing.id ? { ...iss, status_id: targetStatus.id, status_name: targetStatus.name } : iss))
+    } catch (err) {
+      console.error("Failed to update status immediately:", err)
+      setError(err.response?.data?.detail || 'Failed to update status.')
+    } finally {
+      setStatusUpdating(false)
+    }
+  }
+
+  const handleImmediateAssigneeChange = async (nextAssigneeId) => {
+    const parsedId = nextAssigneeId ? Number(nextAssigneeId) : null
+    if (!editing) {
+      setForm(prev => ({ ...prev, assigned_to: parsedId }))
+      return
+    }
+
+    setAssigneeUpdating(true)
+    setError('')
+    try {
+      await updateIssueAssignee(editing.id, { assigned_to: parsedId })
+      const assignedUser = allUsers.find(u => String(u.id) === String(parsedId))
+      setForm(prev => ({ ...prev, assigned_to: parsedId }))
+      setEditing(prev => ({ ...prev, assigned_to: parsedId, assigned_to_user: assignedUser, assignee: assignedUser?.full_name || null }))
+      setIssues(prev => prev.map(iss => iss.id === editing.id ? { ...iss, assigned_to: parsedId, assignee: assignedUser?.full_name || null } : iss))
+    } catch (err) {
+      console.error("Failed to update assignee immediately:", err)
+      setError(err.response?.data?.detail || 'Failed to update assignee.')
+    } finally {
+      setAssigneeUpdating(false)
     }
   }
 
@@ -393,8 +482,15 @@ export default function ReportedIssuesPage() {
       }
       if (editing) {
         await updateIssue(editing.id, payload)
+        setShowForm(false)
+        await load()
+      } else if (isBug) {
+        // Intercept Bug/Defect creation and launch troubleshooting modal
+        console.log("[ReportedIssuesPage] Intercepting Bug save to launch TroubleshootingModal with payload:", payload)
+        setTroubleshootingPayload(payload)
+        setShowTroubleshootingModal(true)
       } else {
-        // Create returns {issue, similar_issues} — handle the new response shape
+        // Task / Feature creation proceeds directly
         const createRes = await createIssue(payload)
         const createData = createRes.data
         if (createData.similar_issues && createData.similar_issues.length > 0) {
@@ -403,7 +499,43 @@ export default function ReportedIssuesPage() {
             similarity: s.similarity_score
           })))
         }
+        setShowForm(false)
+        await load()
       }
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Unable to save issue.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+
+  const handleTroubleshootingConfirm = async (createdIssueData) => {
+    console.log("[ReportedIssuesPage] Troubleshooting confirmed, issue created:", createdIssueData)
+    setShowTroubleshootingModal(false)
+    setShowForm(false)
+    if (createdIssueData.similar_issues && createdIssueData.similar_issues.length > 0) {
+      setSimilarDefects(createdIssueData.similar_issues.map(s => ({
+        issue: s,
+        similarity: s.similarity_score
+      })))
+    }
+    await load()
+  }
+
+  const handleTroubleshootingSkip = async () => {
+    console.log("[ReportedIssuesPage] AI skipped, submitting issue directly...")
+    setUploading(true)
+    try {
+      const createRes = await createIssue(troubleshootingPayload)
+      const createData = createRes.data
+      if (createData.similar_issues && createData.similar_issues.length > 0) {
+        setSimilarDefects(createData.similar_issues.map(s => ({
+          issue: s,
+          similarity: s.similarity_score
+        })))
+      }
+      setShowTroubleshootingModal(false)
       setShowForm(false)
       await load()
     } catch (e) {
@@ -483,12 +615,29 @@ export default function ReportedIssuesPage() {
         .if-assistant-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(99,102,241,0.4); }
         .if-assistant-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+        /* QA Test Intelligence button */
+        .if-qa-btn {
+          margin-left: 12px; display: inline-flex; align-items: center; gap: 8px;
+          padding: 8px 18px; border-radius: 10px; border: none; cursor: pointer;
+          font-size: 0.82rem; font-weight: 600;
+          background: linear-gradient(135deg, #059669, #0d9488);
+          color: #fff; transition: opacity .2s, transform .15s, box-shadow .2s;
+          box-shadow: 0 2px 12px rgba(5,150,105,0.3);
+        }
+        .if-qa-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(5,150,105,0.4); }
+        .if-qa-btn.active {
+          background: linear-gradient(135deg, #047857, #0f766e);
+          box-shadow: inset 0 2px 4px rgba(0,0,0,0.2), 0 0 0 2px #a7f3d0;
+        }
+        .if-qa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
         /* Layout */
         .if-layout {
           display: grid;
-          grid-template-columns: 1fr 420px;
+          grid-template-columns: minmax(0, 1fr) 460px;
           gap: 0;
           min-height: 0;
+          align-items: stretch;
         }
 
         /* Left: form scroll area */
@@ -499,13 +648,13 @@ export default function ReportedIssuesPage() {
           display: flex; flex-direction: column; gap: 28px;
         }
 
-        /* Right: timeline */
+        /* Right: timeline & AI assistant */
         .if-right {
           background: #fafbfc;
-          padding: 28px 24px;
+          padding: 32px 24px;
           display: flex; flex-direction: column;
+          gap: 20px;
           overflow-y: auto;
-          max-height: calc(100vh - 220px);
         }
 
         /* Title input hero */
@@ -659,32 +808,43 @@ export default function ReportedIssuesPage() {
         /* AI Resolution Assistance Card */
         .if-resolution-assistant-card {
           background: #fff;
-          border: 1px solid rgba(15,23,42,0.07);
+          border: 1px solid rgba(15,23,42,0.08);
           border-radius: 16px;
           overflow: hidden;
-          box-shadow: 0 2px 8px rgba(15,23,42,0.04);
-          margin-bottom: 24px;
+          box-shadow: 0 4px 16px rgba(15,23,42,0.05);
+          margin-bottom: 20px;
+          display: flex;
+          flex-direction: column;
+          flex-shrink: 0;
         }
         .if-resolution-assistant-header {
           display: flex; align-items: center; gap: 10px;
-          padding: 14px 20px;
-          background: #f8fafc;
-          border-bottom: 1px solid rgba(15,23,42,0.06);
+          padding: 16px 22px;
+          background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+          border-bottom: 1px solid rgba(15,23,42,0.07);
         }
-        .if-resolution-assistant-icon { font-size: 1rem; }
-        .if-resolution-assistant-title { font-weight: 700; font-size: 0.82rem; letter-spacing: .04em; text-transform: uppercase; color: #64748b; }
-        .if-resolution-assistant-body { padding: 22px 22px; display: flex; flex-direction: column; gap: 20px; }
+        .if-resolution-assistant-icon { font-size: 1.15rem; }
+        .if-resolution-assistant-title { font-weight: 700; font-size: 0.85rem; letter-spacing: .04em; text-transform: uppercase; color: #475569; }
+        .if-resolution-assistant-body { 
+          padding: 24px 22px; 
+          display: flex; 
+          flex-direction: column; 
+          gap: 22px; 
+          max-height: 720px;
+          overflow-y: auto;
+          scrollbar-width: thin;
+        }
         .if-resolution-assistant-section h4 {
-          font-weight: 700; font-size: 0.9rem; color: #0f172a; margin-bottom: 8px;
+          font-weight: 700; font-size: 0.92rem; color: #0f172a; margin-bottom: 10px;
         }
         .if-resolution-assistant-section ul {
           margin: 0; padding-left: 20px;
         }
         .if-resolution-assistant-section ul li {
-          color: #475569; line-height: 1.6;
+          color: #334155; line-height: 1.65; margin-bottom: 4px;
         }
         .if-resolution-assistant-section p {
-          color: #475569; line-height: 1.6;
+          color: #334155; line-height: 1.65; margin: 0;
         }
         .if-spinner {
           display: flex; align-items: center; justify-content: center;
@@ -694,28 +854,17 @@ export default function ReportedIssuesPage() {
         /* Responsive */
         @media (max-width: 1100px) {
           .if-layout { grid-template-columns: 1fr; }
-          .if-right { border-top: 1px solid rgba(15,23,42,0.07); max-height: 500px; border-radius: 0 0 20px 20px; }
+          .if-right { border-top: 1px solid rgba(15,23,42,0.07); border-radius: 0 0 20px 20px; padding: 24px 20px; }
           .if-grid-3 { grid-template-columns: 1fr 1fr; }
           .if-resolution-assistant-card { margin-bottom: 16px !important; }
+          .if-resolution-assistant-body { max-height: 550px; }
         }
         @media (max-width: 640px) {
           .if-grid-2, .if-grid-3 { grid-template-columns: 1fr; }
           .if-left { padding: 20px; }
+          .if-right { padding: 20px 16px; }
           .if-resolution-assistant-card { margin-bottom: 12px !important; }
-          .if-right { max-height: 400px; }
-        }
-        /* Ensure AI Resolution Assistance section has proper spacing */
-        .if-resolution-assistant-card {
-          margin-bottom: 24px;
-          min-height: 0; /* Prevent flex-shrink issues */
-        }
-        /* Prevent IssueTimeline from overriding AI assistance content */
-        .if-right {
-          display: flex;
-          flex-direction: column;
-        }
-        .if-resolution-assistant-card {
-          flex-shrink: 0; /* Prevent the card from shrinking */
+          .if-resolution-assistant-body { max-height: 480px; padding: 18px 16px; gap: 16px; }
         }
       `}</style>
 
@@ -745,9 +894,9 @@ export default function ReportedIssuesPage() {
                 <i className={searchMode === 'semantic' ? 'bi bi-stars' : 'bi bi-search'} />
               </span>
               {searchMode === 'keyword' ? (
-                <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Search by ID or title…" value={query} onChange={(e) => setQuery(e.target.value)} />
+                <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Search by ID or title…" value={query} autoComplete="off" onChange={(e) => setQuery(e.target.value)} />
               ) : (
-                <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Semantic search — describe the issue in natural language…" value={semanticQuery} onChange={(e) => setSemanticQuery(e.target.value)} />
+                <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Semantic search — describe the issue in natural language…" value={semanticQuery} autoComplete="off" onChange={(e) => setSemanticQuery(e.target.value)} />
               )}
             </div>
             {/* Search mode toggle */}
@@ -810,10 +959,13 @@ export default function ReportedIssuesPage() {
                       <div key={r.id}
                         onClick={async () => { 
                           try {
-                             const res = await getIssue(r.issue.id || r.id);
+                             const issueId = r.id || r.issue?.id;
+                             if (!issueId) return;
+                             const res = await getIssue(issueId);
                              if (res.data) open(res.data);
                           } catch (e) {
-                             console.error("Failed to open similar issue", e);
+                             console.error("Failed to open semantic search issue", e);
+                             setError("Failed to open defect details.");
                           }
                         }}
                         style={{
@@ -871,8 +1023,8 @@ export default function ReportedIssuesPage() {
                   </>
                 ) : <>✨ AI Clean & Triage</>}
               </button>
-                            {/* AI Resolution Assistance Button - only for Developer/Project Manager and when editing an issue */}
-              {editing && (userRoles.includes('Developer') || userRoles.includes('Project Manager')) && (
+              {/* AI Resolution Assistance Button - only for Developer/Project Manager/Admin/TL and when editing a Bug/Defect */}
+              {editing && isBug && (userRoles.includes('Developer') || userRoles.includes('Project Manager') || userRoles.includes('Admin') || userRoles.includes('Team Leader')) && (
                 <button type="button" className="if-assistant-btn" onClick={handleGetResolutionAssistance}
                   disabled={resolutionAssistanceLoading}>
                   {resolutionAssistanceLoading ? (
@@ -885,8 +1037,20 @@ export default function ReportedIssuesPage() {
                   ) : <>🤖 AI Resolution Assistance</>}
                 </button>
               )}
+
+              {/* AI Test Intelligence Button - when editing an issue and role is allowed */}
+              {editing && canAccessTestIntelligence && (
+                <button 
+                  type="button" 
+                  className={`if-qa-btn ${showTestIntelligence ? 'active' : ''}`}
+                  onClick={() => setShowTestIntelligence(prev => !prev)}
+                >
+                  🧪 AI Test Intelligence
+                </button>
+              )}
             </div>
           </div>
+
 
           {/* Similar Defect Warning Banner */}
           {similarDefects.length > 0 && (
@@ -963,7 +1127,7 @@ export default function ReportedIssuesPage() {
 
             {/* ── LEFT: Form ── */}
             <div className="if-left">
-              <form id="issue-form" onSubmit={save}>
+              <form id="issue-form" onSubmit={save} autoComplete="off">
 
                 {/* Title */}
                 <div className="if-title-wrap">
@@ -973,6 +1137,7 @@ export default function ReportedIssuesPage() {
                     className="if-title-input"
                     placeholder="Describe the issue in a single clear sentence…"
                     value={form.title}
+                    autoComplete="off"
                     onChange={e => setForm({ ...form, title: e.target.value })}
                   />
                 </div>
@@ -997,20 +1162,17 @@ export default function ReportedIssuesPage() {
                     </FieldGroup>
                     <FieldGroup label="Status" required>
                       {(() => {
-                        const canChangeStatus = userRoles.includes('Admin') || userRoles.includes('Project Manager');
+                        const canChangeStatus = userRoles.includes('Admin') || userRoles.includes('Project Manager') || userRoles.includes('Team Leader');
                         if (canChangeStatus) {
                           return (
-                            <select required className="if-select" value={form.status_id || ''} onChange={e => {
-                              const nextId = e.target.value;
-                              const s = statuses.find(x => String(x.id) === String(nextId));
-                              if (s?.name === 'Resolved') {
-                                openResolveModal();
-                              } else {
-                                setForm({ ...form, status_id: nextId });
-                              }
-                            }}>
-                              {statuses.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                            </select>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <select required className="if-select" value={form.status_id || ''} disabled={statusUpdating} onChange={e => handleImmediateStatusChange(e.target.value)}>
+                                {statuses.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                              </select>
+                              {statusUpdating && (
+                                <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16, flexShrink: 0 }} fill="none" stroke="#3b82f6" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
+                              )}
+                            </div>
                           );
                         }
 
@@ -1036,20 +1198,14 @@ export default function ReportedIssuesPage() {
                           buttons.push({ label: 'Unresolved', next: 'In Progress', btnClass: 'btn-danger' });
                         }
 
-                        const setStatusName = (name) => {
-                          if (name === 'Resolved') {
-                            openResolveModal();
-                            return;
-                          }
-                          const s = statuses.find(x => x.name === name);
-                          if (s) setForm({ ...form, status_id: s.id });
-                        };
-
                         return (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', height: '44px' }}>
                             <span style={{ fontWeight: 600, color: '#334155', padding: '6px 12px', background: '#e2e8f0', borderRadius: '6px' }}>{currentName}</span>
-                            {buttons.map(b => (
-                              <button type="button" key={b.next} className={`btn btn-sm ${b.btnClass}`} onClick={() => setStatusName(b.next)}>{b.label}</button>
+                            {statusUpdating && (
+                              <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16 }} fill="none" stroke="#3b82f6" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
+                            )}
+                            {!statusUpdating && buttons.map(b => (
+                              <button type="button" key={b.next} className={`btn btn-sm ${b.btnClass}`} onClick={() => handleImmediateStatusChange(b.next)}>{b.label}</button>
                             ))}
                           </div>
                         );
@@ -1072,20 +1228,31 @@ export default function ReportedIssuesPage() {
                     </div>
                   </FieldGroup>
 
-                  <div className="if-grid-2">
-                    <FieldGroup label="Priority" required>
-                      <select required className="if-select" value={form.priority_id || ''} onChange={e => setForm({ ...form, priority_id: e.target.value })}>
-                        <option value="">Select priority…</option>
-                        {priorities.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                      </select>
-                    </FieldGroup>
-                    <FieldGroup label="Severity" required>
-                      <select required className="if-select" value={form.severity_id || ''} onChange={e => setForm({ ...form, severity_id: e.target.value })}>
-                        <option value="">Select severity…</option>
-                        {severities.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                      </select>
-                    </FieldGroup>
-                  </div>
+                  {isBug ? (
+                    <div className="if-grid-2">
+                      <FieldGroup label="Priority" required>
+                        <select required className="if-select" value={form.priority_id || ''} onChange={e => setForm({ ...form, priority_id: e.target.value })}>
+                          <option value="">Select priority…</option>
+                          {priorities.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                        </select>
+                      </FieldGroup>
+                      <FieldGroup label="Severity" required>
+                        <select required className="if-select" value={form.severity_id || ''} onChange={e => setForm({ ...form, severity_id: e.target.value })}>
+                          <option value="">Select severity…</option>
+                          {severities.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                        </select>
+                      </FieldGroup>
+                    </div>
+                  ) : (
+                    <div className="if-grid-1" style={{ marginBottom: '12px' }}>
+                      <FieldGroup label="Priority" required hint="Set priority urgency for this task / feature">
+                        <select required className="if-select" value={form.priority_id || ''} onChange={e => setForm({ ...form, priority_id: e.target.value })}>
+                          <option value="">Select priority…</option>
+                          {priorities.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                        </select>
+                      </FieldGroup>
+                    </div>
+                  )}
                   
                   <div className="if-grid-2">
                     <FieldGroup label="Sprint" hint="Assign this issue to an active sprint.">
@@ -1104,53 +1271,58 @@ export default function ReportedIssuesPage() {
                       </select>
                     </FieldGroup>
                     <FieldGroup label="Assignee" hint="Who should resolve this issue?">
-                      <select className="if-select"
-                        value={form.assigned_to || ''}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setForm({ ...form, assigned_to: val ? val : null });
-                        }}
-                        placeholder="Unassigned"
-                        disabled={userRoles.includes('Developer') || userRoles.includes('QA') || userRoles.includes('Reporter')}
-                      >
-                        <option value="">Unassigned</option>
-                        {allUsers.filter(u => u.roles && u.roles.some(r => r.name === 'Developer')).map(u => (
-                          <option key={u.id} value={u.id}>
-                            {u.full_name}
-                          </option>
-                        ))}
-                      </select>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <select className="if-select"
+                          value={form.assigned_to || ''}
+                          onChange={(e) => handleImmediateAssigneeChange(e.target.value)}
+                          placeholder="Unassigned"
+                          disabled={assigneeUpdating || userRoles.includes('Developer') || userRoles.includes('QA') || userRoles.includes('Reporter')}
+                        >
+                          <option value="">Unassigned</option>
+                          {allUsers.filter(u => u.roles && u.roles.some(r => r.name === 'Developer')).map(u => (
+                            <option key={u.id} value={u.id}>
+                              {u.full_name}
+                            </option>
+                          ))}
+                        </select>
+                        {assigneeUpdating && (
+                          <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16, flexShrink: 0 }} fill="none" stroke="#3b82f6" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
+                        )}
+                      </div>
                     </FieldGroup>
                   </div>
                 </SectionCard>
 
                 {/* Description */}
-                <SectionCard icon="📝" title="Description">
-                  <FieldGroup label="Summary" required hint="Minimum 20 characters. Be specific about what is broken and where.">
+                <SectionCard icon={isBug ? "📝" : "📋"} title={isBug ? "Description" : "Details & Description"}>
+                  <FieldGroup label="Summary" required hint={isBug ? "Minimum 20 characters. Be specific about what is broken and where." : "Provide complete requirements or task definition."}>
                     <textarea
                       required className="if-textarea"
-                      placeholder="Provide a clear, concise explanation of the issue…"
+                      placeholder={isBug ? "Provide a clear, concise explanation of the issue…" : "Describe the goals, requirements, or scope…"}
                       rows={4}
                       value={form.description}
                       onChange={e => setForm({ ...form, description: e.target.value })}
                     />
                   </FieldGroup>
-                  <div className="if-grid-3">
-                    <FieldGroup label="Steps to Reproduce">
-                      <textarea className="if-textarea" placeholder={"1. Navigate to...\n2. Click on...\n3. Observe..."} rows={4}
-                        value={form.steps_to_reproduce} onChange={e => setForm({ ...form, steps_to_reproduce: e.target.value })} />
-                    </FieldGroup>
-                    <FieldGroup label="Expected Behavior">
-                      <textarea className="if-textarea" placeholder="Describe what should happen…" rows={4}
-                        value={form.expected_behavior} onChange={e => setForm({ ...form, expected_behavior: e.target.value })} />
-                    </FieldGroup>
-                    <FieldGroup label="Actual Behavior">
-                      <textarea className="if-textarea" placeholder="Describe what actually happens…" rows={4}
-                        value={form.actual_behavior} onChange={e => setForm({ ...form, actual_behavior: e.target.value })} />
-                    </FieldGroup>
-                  </div>
+
+                  {isBug && (
+                    <div className="if-grid-3">
+                      <FieldGroup label="Steps to Reproduce">
+                        <textarea className="if-textarea" placeholder={"1. Navigate to...\n2. Click on...\n3. Observe..."} rows={4}
+                          value={form.steps_to_reproduce} onChange={e => setForm({ ...form, steps_to_reproduce: e.target.value })} />
+                      </FieldGroup>
+                      <FieldGroup label="Expected Behavior">
+                        <textarea className="if-textarea" placeholder="Describe what should happen…" rows={4}
+                          value={form.expected_behavior} onChange={e => setForm({ ...form, expected_behavior: e.target.value })} />
+                      </FieldGroup>
+                      <FieldGroup label="Actual Behavior">
+                        <textarea className="if-textarea" placeholder="Describe what actually happens…" rows={4}
+                          value={form.actual_behavior} onChange={e => setForm({ ...form, actual_behavior: e.target.value })} />
+                      </FieldGroup>
+                    </div>
+                  )}
                   
-                  {editing && (form.root_cause || form.resolution || ['Resolved', 'Closed'].includes(statuses.find(s => String(s.id) === String(form.status_id))?.name)) && (
+                  {isBug && editing && (form.root_cause || form.resolution || ['Resolved', 'Closed'].includes(statuses.find(s => String(s.id) === String(form.status_id))?.name)) && (
                     <div style={{
                       marginTop: '16px',
                       padding: '16px 18px', borderRadius: '12px',
@@ -1181,7 +1353,7 @@ export default function ReportedIssuesPage() {
                     </div>
                   )}
 
-                  {editing && !form.root_cause && !form.resolution && !['Resolved', 'Closed'].includes(statuses.find(s => String(s.id) === String(form.status_id))?.name) && (
+                  {isBug && editing && !form.root_cause && !form.resolution && !['Resolved', 'Closed'].includes(statuses.find(s => String(s.id) === String(form.status_id))?.name) && (
                     <div className="if-grid-2" style={{ marginTop: '16px' }}>
                       <FieldGroup label="Root Cause (Optional)">
                         <textarea className="if-textarea" placeholder="Describe the underlying cause of the defect..." rows={3}
@@ -1196,16 +1368,19 @@ export default function ReportedIssuesPage() {
                 </SectionCard>
 
                 {/* Environment */}
-                <SectionCard icon="🌐" title="Environment">
-                  <div className="if-grid-2">
-                    <FieldGroup label="Environment" hint="e.g. Production, Staging, Dev">
-                      <input className="if-input" placeholder="Production" value={form.environment} onChange={e => setForm({ ...form, environment: e.target.value })} />
-                    </FieldGroup>
-                    <FieldGroup label="Browser / Device" hint="e.g. Chrome 115, iPhone 14 Pro">
-                      <input className="if-input" placeholder="Chrome 115" value={form.browser} onChange={e => setForm({ ...form, browser: e.target.value })} />
-                    </FieldGroup>
-                  </div>
-                </SectionCard>
+                {isBug && (
+                  <SectionCard icon="🌐" title="Environment">
+                    <div className="if-grid-2">
+                      <FieldGroup label="Environment" hint="e.g. Production, Staging, Dev">
+                        <input className="if-input" placeholder="Production" value={form.environment} autoComplete="off" onChange={e => setForm({ ...form, environment: e.target.value })} />
+                      </FieldGroup>
+                      <FieldGroup label="Browser / Device" hint="e.g. Chrome 115, iPhone 14 Pro">
+                        <input className="if-input" placeholder="Chrome 115" value={form.browser} autoComplete="off" onChange={e => setForm({ ...form, browser: e.target.value })} />
+                      </FieldGroup>
+                    </div>
+                  </SectionCard>
+                )}
+
 
                 {/* Attachments — multi-file gallery */}
                 <SectionCard icon="📎" title="Attachments">
@@ -1378,6 +1553,15 @@ export default function ReportedIssuesPage() {
                   </div>
                 ) : null}
 
+                {/* AI Test Intelligence Card */}
+                {showTestIntelligence && canAccessTestIntelligence && (
+                  <AITestIntelligence 
+                    issueId={editing.id} 
+                    onClose={() => setShowTestIntelligence(false)} 
+                  />
+                )}
+
+
                 {/* AI Resolution Assistance Card */}
                 {resolutionAssistanceLoading ? (
                   <div className="if-resolution-assistant-card" style={{ marginBottom: '24px' }}>
@@ -1411,6 +1595,54 @@ export default function ReportedIssuesPage() {
                       <span className="if-resolution-assistant-title">AI Resolution Assistance</span>
                     </div>
                     <div className="if-resolution-assistant-body">
+                      {/* AI Root-Cause Analysis (if available on the issue) */}
+                      {resolutionAssistanceData.ai_root_cause && (
+                        <div className="if-resolution-assistant-section" style={{
+                          marginBottom: '24px', padding: '16px', borderRadius: '12px',
+                          background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                          border: '1px solid #bbf7d0'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                            <span style={{ fontSize: '1.2rem' }}>🎯</span>
+                            <h4 style={{ margin: 0, color: '#166534', letterSpacing: '0.05em' }}>AI Root Cause Analysis</h4>
+                          </div>
+                          
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                            <span style={{ fontWeight: 600, color: '#166534', fontSize: '0.85rem' }}>
+                              Status: <span style={{ textTransform: 'capitalize' }}>{resolutionAssistanceData.ai_root_cause.status.replace('_', ' ')}</span>
+                            </span>
+                            <span style={{ fontWeight: 600, color: '#166534', fontSize: '0.85rem' }}>
+                              Confidence: {Math.round(resolutionAssistanceData.ai_root_cause.confidence * 100)}%
+                            </span>
+                          </div>
+
+                          <div style={{ marginBottom: '12px' }}>
+                            <strong style={{ display: 'block', color: '#15803d', fontSize: '0.85rem', marginBottom: '4px' }}>Identified Cause:</strong>
+                            <div style={{ color: '#14532d', fontSize: '0.95rem', lineHeight: 1.5 }}>
+                              {resolutionAssistanceData.ai_root_cause.root_cause}
+                            </div>
+                          </div>
+
+                          {resolutionAssistanceData.ai_root_cause.evidence && resolutionAssistanceData.ai_root_cause.evidence.length > 0 && (
+                            <div style={{ marginBottom: '12px' }}>
+                              <strong style={{ display: 'block', color: '#15803d', fontSize: '0.85rem', marginBottom: '4px' }}>Evidence:</strong>
+                              <ul style={{ margin: 0, paddingLeft: '20px', color: '#14532d', fontSize: '0.9rem' }}>
+                                {resolutionAssistanceData.ai_root_cause.evidence.map((ev, i) => <li key={i}>{ev}</li>)}
+                              </ul>
+                            </div>
+                          )}
+
+                          {resolutionAssistanceData.ai_root_cause.recommended_fix && (
+                            <div>
+                              <strong style={{ display: 'block', color: '#15803d', fontSize: '0.85rem', marginBottom: '4px' }}>Recommended Fix:</strong>
+                              <div style={{ color: '#14532d', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                                {resolutionAssistanceData.ai_root_cause.recommended_fix}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {resolutionAssistanceData.historical_resolutions && resolutionAssistanceData.historical_resolutions.length > 0 && (
                         <div className="if-resolution-assistant-section">
                           <h4>Historical Resolutions</h4>
@@ -1467,7 +1699,10 @@ export default function ReportedIssuesPage() {
                     </div>
                   </div>
                 ) : null}
-                <IssueTimeline issueId={editing.id} />
+                <IssueTimeline 
+                  issueId={editing.id} 
+                  lookups={{ statuses, priorities, severities, categories, modules, allProjects, allUsers, projectSprints }} 
+                />
               </div>
             )}
           </div>
@@ -1554,6 +1789,7 @@ export default function ReportedIssuesPage() {
                 className="if-input"
                 placeholder="e.g. Fix merged into main branch under PR #142"
                 value={resolveForm.comment}
+                autoComplete="off"
                 onChange={e => setResolveForm({ ...resolveForm, comment: e.target.value })}
               />
             </div>
@@ -1574,6 +1810,15 @@ export default function ReportedIssuesPage() {
           <p>Delete issue <strong>"{deleteTarget?.title}"</strong>?</p>
           <p className="text-muted" style={{ marginTop: 6, fontSize: '.88rem' }}>This action cannot be undone.</p>
         </Modal>
+      )}
+      {/* Troubleshooting Modal */}
+      {showTroubleshootingModal && (
+        <TroubleshootingModal
+          payload={troubleshootingPayload}
+          onConfirm={handleTroubleshootingConfirm}
+          onSkip={handleTroubleshootingSkip}
+          onClose={() => setShowTroubleshootingModal(false)}
+        />
       )}
     </>
   )

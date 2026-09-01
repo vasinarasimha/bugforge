@@ -96,3 +96,52 @@ def test_resolution_assistance_endpoint_success():
             app.dependency_overrides.pop(get_current_user, None)
             app.dependency_overrides.pop(mock_get_db, None)
 
+
+def test_format_issue_heuristic_extraction_with_headers():
+    from app.services.llm_service import llm_service
+
+    raw_title = "Checkout page freeze"
+    raw_description = """
+Summary: The page freezes when clicking submit.
+Steps to reproduce:
+1. Go to cart
+2. Click Checkout
+3. Click Place Order
+Environment: Staging, Windows 11
+Browser: Google Chrome 120
+Expected Behavior: Order confirmed
+Actual Behavior: Infinite loading spinner
+"""
+    result = llm_service._heuristic_extract(raw_title, raw_description)
+    assert result["title"] == "Checkout page freeze"
+    assert "1. Go to cart" in result["steps_to_reproduce"]
+    assert "Staging" in result["environment"]
+    assert "Google Chrome" in result["browser"]
+    assert "Order confirmed" in result["expected_behavior"]
+    assert "Infinite loading spinner" in result["actual_behavior"]
+
+
+def test_format_issue_heuristic_natural_language_extraction():
+    from app.services.llm_service import llm_service
+
+    raw_title = "Sidebar collapse glitch"
+    raw_description = "I noticed this bug while testing in the QA environment using Firefox on macOS. 1. Open dashboard 2. Click hamburger icon. The sidebar disappears completely."
+
+    result = llm_service._heuristic_extract(raw_title, raw_description)
+    assert "qa" in result["environment"].lower() or "macos" in result["environment"].lower()
+    assert "firefox" in result["browser"].lower()
+    assert result["steps_to_reproduce"] is not None
+
+
+def test_format_issue_no_hallucination_when_missing():
+    from app.services.llm_service import llm_service
+
+    raw_title = "Simple typo in header"
+    raw_description = "The header says 'BugFrge' instead of 'BugForge' on the landing page."
+
+    result = llm_service._heuristic_extract(raw_title, raw_description)
+    assert result["steps_to_reproduce"] is None
+    assert result["environment"] is None
+    assert result["browser"] is None
+
+

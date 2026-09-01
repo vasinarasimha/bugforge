@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { getPMStats } from '../../services/dashboardService'
+import { getFieldLabel } from '../../utils/activityHelper'
 
 const fmt = (n) => (n || 0).toLocaleString()
 const timeAgo = (iso) => {
@@ -186,7 +187,6 @@ function CriticalWatchlist({ issues }) {
 }
 
 function ActivityFeed({ items }) {
-  const fieldLabel = (f) => ({ status_id: 'Status', priority_id: 'Priority', sprint_id: 'Sprint', assigned_to: 'Assignee' }[f] || f)
   return (
     <div className="pm-section-card">
       <h3 className="pm-section-title">
@@ -201,9 +201,9 @@ function ActivityFeed({ items }) {
             <div key={h.id} className="pm-activity-item">
               <div className="pm-activity-dot" />
               <div className="pm-activity-body">
-                <span className="pm-activity-field">{fieldLabel(h.field_name)}</span> changed
-                {h.old_value && <> from <em>{h.old_value}</em></>}
-                {h.new_value && <> → <strong>{h.new_value}</strong></>}
+                <strong>{h.user_name || 'User'}</strong> changed <span className="pm-activity-field">{getFieldLabel(h.field_name)}</span>
+                {h.old_value && h.old_value !== 'None' && <> from <em>{h.old_value}</em></>}
+                {h.new_value && h.new_value !== 'None' && <> to <strong>{h.new_value}</strong></>}
                 <span className="pm-activity-time">{timeAgo(h.created_at)}</span>
               </div>
             </div>

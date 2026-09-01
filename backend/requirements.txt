@@ -16,3 +16,4 @@ requests>=2.25.1
 pytest>=8.0.0
 httpx>=0.28.0
 python-multipart>=0.0.20
+huggingface_hub>=0.20.0
