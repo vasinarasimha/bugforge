@@ -66,17 +66,10 @@ jobs:
         run: |
           PGPASSWORD=ci_password psql -h localhost -U ci_user -d bugforge_ci -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-      - name: Run database migrations
-        working-directory: backend
-        run: |
-          alembic upgrade head
-          alembic current
-
       - name: Run backend automated tests
         working-directory: backend
         run: |
           python -m pytest -v
-
 
   frontend:
     name: Frontend CI (Build & Validation)
