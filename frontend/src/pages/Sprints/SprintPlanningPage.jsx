@@ -122,10 +122,10 @@ function SprintFormModal({ onClose, onSave, statuses, projects, initial }) {
         </div>
         <div className="card-body">
           {error && <div className="alert alert-danger p-2">{error}</div>}
-          <form onSubmit={submit}>
+          <form onSubmit={submit} autoComplete="off">
             <div className="mb-3">
               <label className="form-label fw-bold">Sprint Name</label>
-              <input required className="form-control" value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Sprint 1" />
+              <input required className="form-control" value={form.name} autoComplete="off" onChange={e => set('name', e.target.value)} placeholder="e.g. Sprint 1" />
             </div>
             {!initial && (
               <div className="mb-3">
@@ -147,16 +147,16 @@ function SprintFormModal({ onClose, onSave, statuses, projects, initial }) {
             <div className="row mb-3">
               <div className="col">
                 <label className="form-label fw-bold">Start Date</label>
-                <input type="date" className="form-control" value={form.start_date} onChange={e => set('start_date', e.target.value)} />
+                <input type="date" className="form-control" value={form.start_date} autoComplete="off" onChange={e => set('start_date', e.target.value)} />
               </div>
               <div className="col">
                 <label className="form-label fw-bold">End Date</label>
-                <input type="date" className="form-control" value={form.end_date} onChange={e => set('end_date', e.target.value)} />
+                <input type="date" className="form-control" value={form.end_date} autoComplete="off" onChange={e => set('end_date', e.target.value)} />
               </div>
             </div>
             <div className="mb-4">
               <label className="form-label fw-bold">Goal</label>
-              <textarea className="form-control" value={form.goal} onChange={e => set('goal', e.target.value)} placeholder="Optional goal..." rows="2" />
+              <textarea className="form-control" value={form.goal} autoComplete="off" onChange={e => set('goal', e.target.value)} placeholder="Optional goal..." rows="2" />
             </div>
             <div className="d-flex justify-content-end gap-2">
               <button type="button" className="btn btn-light border" onClick={onClose}>Cancel</button>
@@ -302,6 +302,7 @@ export default function SprintPlanningPage() {
                 className="form-control mb-3 bg-light" 
                 placeholder="Search backlog..." 
                 value={backlogSearch} 
+                autoComplete="off"
                 onChange={e => setBacklogSearch(e.target.value)} 
               />
               {sprints.length > 0 && (

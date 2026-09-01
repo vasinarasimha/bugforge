@@ -56,6 +56,7 @@ def serialize(i):
         "reporter_name": i.reporter.full_name if getattr(i, 'reporter', None) else "",
         "assigned_to": i.assigned_to,
         "assignee": i.assignee.full_name if getattr(i, 'assignee', None) else None,
+        "ai_root_cause_session_id": getattr(i, 'ai_root_cause_session_id', None),
         "created_at": i.created_at,
         "updated_at": i.updated_at,
         "is_active": i.is_active
@@ -258,7 +259,84 @@ async def update_issue_status(issue_id: int, data: IssueStatusUpdate, db: Annota
 
     return serialize(issue)
 
+
+class IssueAssignUpdate(BaseModel):
+    assigned_to: int | None = None
+
+
+@router.patch("/{issue_id}/assign", response_model=IssueResponse)
+async def update_issue_assignee(
+    issue_id: int,
+    data: IssueAssignUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    """
+    Immediately persist assignee changes to the database.
+    """
+    from app.repositories.user_repository import UserRepository
+
+    issue = service.get(db, issue_id)
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    user_roles = [r.name for r in user.roles]
+    can_assign = any(
+        r in ["Admin", "Project Manager", "Team Leader", "PM", "TL", "QA"] for r in user_roles
+    )
+    if not can_assign:
+        raise HTTPException(status_code=403, detail="Not authorized to reassign this issue")
+
+    if data.assigned_to is not None and data.assigned_to > 0:
+        assignee_user = UserRepository().get_by_id(db, data.assigned_to)
+        if not assignee_user:
+            raise HTTPException(status_code=422, detail="Selected assignee does not exist")
+
+    old_assigned_to = issue.assigned_to
+    issue.assigned_to = data.assigned_to if (data.assigned_to and data.assigned_to > 0) else None
+
+    db.commit()
+    db.refresh(issue)
+
+    # Track history
+    from types import SimpleNamespace
+    old_mock = SimpleNamespace(
+        id=issue.id,
+        issue_key=issue.issue_key,
+        title=issue.title,
+        description=issue.description,
+        issue_type=issue.issue_type,
+        status_id=issue.status_id,
+        priority_id=issue.priority_id,
+        severity_id=issue.severity_id,
+        category_id=issue.category_id,
+        module_id=issue.module_id,
+        environment=issue.environment,
+        browser=issue.browser,
+        operating_system=issue.operating_system,
+        reproduction_steps=issue.reproduction_steps,
+        expected_behavior=issue.expected_behavior,
+        actual_behavior=issue.actual_behavior,
+        root_cause=issue.root_cause,
+        resolution=issue.resolution,
+        attachment_path=issue.attachment_path,
+        sprint_id=issue.sprint_id,
+        project_id=issue.project_id,
+        reporter_id=issue.reporter_id,
+        assigned_to=old_assigned_to,
+        embedding_vector=issue.embedding_vector,
+        created_at=issue.created_at,
+        updated_at=issue.updated_at,
+        is_active=issue.is_active,
+        is_deleted=issue.is_deleted
+    )
+    service.track_issue_changes(db, old_mock, issue, user.id)
+
+    return serialize(issue)
+
+
 @router.delete("/{issue_id}", status_code=status.HTTP_204_NO_CONTENT)
+
 
 
 async def delete_issue(issue_id: int, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):

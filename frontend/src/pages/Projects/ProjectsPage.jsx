@@ -4,6 +4,7 @@ import Modal from '../../components/Modal/Modal'
 import { createProject, deleteProject, getProjects, updateProject, getProjectHistory } from '../../services/projectService'
 import { getUsers } from '../../services/authService'
 import { useAuth } from '../../hooks/useAuth'
+import { getFieldLabel } from '../../utils/activityHelper'
 import { useLocation } from 'react-router-dom'
 
 export default function ProjectsPage() {
@@ -179,6 +180,7 @@ export default function ProjectsPage() {
                 style={{ paddingLeft: 38, maxWidth: 280 }}
                 placeholder="Search projects…"
                 value={query}
+                autoComplete="off"
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
@@ -209,7 +211,7 @@ export default function ProjectsPage() {
         {showModal && (
           <div className="modal d-block" tabIndex="-1">
             <div className="modal-dialog modal-lg">
-              <form className="modal-content" onSubmit={save}>
+              <form className="modal-content" onSubmit={save} autoComplete="off">
               <div className="modal-header">
                 <h5 className="modal-title">{editing ? 'Edit Project' : 'New Project'}</h5>
                 <button type="button" className="btn-close" onClick={() => setShowModal(false)} />
@@ -224,7 +226,7 @@ export default function ProjectsPage() {
                 <div className="row mb-3">
                   <div className="col-md-6">
                     <label className="form-label required">Project Name</label>
-                    <input required className="form-control" value={form.project_name} onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="e.g. Phoenix Backend" />
+                    <input required className="form-control" value={form.project_name} autoComplete="off" onChange={(e) => setForm({ ...form, project_name: e.target.value })} placeholder="e.g. Phoenix Backend" />
                   </div>
                   <div className="col-md-6">
                     <label className="form-label required">Status</label>
@@ -236,39 +238,39 @@ export default function ProjectsPage() {
 
                 <div className="mb-3">
                   <label className="form-label required">Description</label>
-                  <textarea required className="form-control" rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What is this project about?" />
+                  <textarea required className="form-control" rows={3} value={form.description} autoComplete="off" onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What is this project about?" />
                 </div>
 
                 <div className="row mb-3">
                   <div className="col-md-6">
                     <label className="form-label">Client / Customer</label>
-                    <input className="form-control" value={form.client_name} onChange={(e) => setForm({ ...form, client_name: e.target.value })} placeholder="e.g. ACME Corp" />
+                    <input className="form-control" value={form.client_name} autoComplete="off" onChange={(e) => setForm({ ...form, client_name: e.target.value })} placeholder="e.g. ACME Corp" />
                   </div>
                   <div className="col-md-6">
                     <label className="form-label">Repository URL</label>
-                    <input className="form-control" value={form.repository_url} onChange={(e) => setForm({ ...form, repository_url: e.target.value })} placeholder="e.g. https://github.com/..." />
+                    <input className="form-control" value={form.repository_url} autoComplete="off" onChange={(e) => setForm({ ...form, repository_url: e.target.value })} placeholder="e.g. https://github.com/..." />
                   </div>
                 </div>
 
                 <div className="row mb-3">
                   <div className="col-md-6">
                     <label className="form-label">Start Date</label>
-                    <input type="date" className="form-control" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+                    <input type="date" className="form-control" value={form.start_date} autoComplete="off" onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
                   </div>
                   <div className="col-md-6">
                     <label className="form-label">End Date</label>
-                    <input type="date" className="form-control" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+                    <input type="date" className="form-control" value={form.end_date} autoComplete="off" onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
                   </div>
                 </div>
 
                 <div className="row mb-3">
                   <div className="col-md-6">
                     <label className="form-label">Budget</label>
-                    <input className="form-control" value={form.budget} onChange={(e) => setForm({ ...form, budget: e.target.value })} placeholder="e.g. $50,000" />
+                    <input className="form-control" value={form.budget} autoComplete="off" onChange={(e) => setForm({ ...form, budget: e.target.value })} placeholder="e.g. $50,000" />
                   </div>
                   <div className="col-md-6">
                     <label className="form-label">Tech Stack</label>
-                    <input className="form-control" value={form.tech_stack} onChange={(e) => setForm({ ...form, tech_stack: e.target.value })} placeholder="e.g. React, Python" />
+                    <input className="form-control" value={form.tech_stack} autoComplete="off" onChange={(e) => setForm({ ...form, tech_stack: e.target.value })} placeholder="e.g. React, Python" />
                   </div>
                 </div>
 
@@ -335,8 +337,8 @@ export default function ProjectsPage() {
                         {historyRecords.map((record) => (
                           <tr key={record.id}>
                             <td>
-                              <span className="badge bg-info text-wrap" style={{ maxWidth: '150px' }}>
-                                {record.field_name}
+                              <span className="badge bg-info text-wrap text-capitalize" style={{ maxWidth: '150px' }}>
+                                {getFieldLabel(record.field_name)}
                               </span>
                             </td>
                             <td>{record.old_value === null ? '<em>None</em>' : record.old_value}</td>

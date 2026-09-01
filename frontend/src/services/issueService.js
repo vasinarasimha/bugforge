@@ -36,8 +36,10 @@ export const addIssueAttachment = (id, file) => {
 
 export const deleteIssueAttachment = (id, attachmentId) => apiClient.delete(`/issues/${id}/attachments/${attachmentId}`)
 export const updateIssueStatus = (id, data) => apiClient.patch(`/issues/${id}/status`, data)
+export const updateIssueAssignee = (id, data) => apiClient.patch(`/issues/${id}/assign`, data)
 
 // ── Semantic Search & Similar Issues ──
+
 
 /** Search issues using a natural-language query */
 export const semanticSearch = (query, projectId = null, limit = null) =>

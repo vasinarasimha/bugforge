@@ -9,11 +9,15 @@ from app.models.comment import IssueComment
 from app.models.sprint import Sprint
 from app.models.attachment import IssueAttachment
 from app.models.sprint import Sprint
+from app.models.troubleshooting import TroubleshootingSession, TroubleshootingAnswer
+from app.models.team import Team, TeamMember
 
 __all__ = [
     "User",
     "Project",
     "ProjectMember",
+    "Team",
+    "TeamMember",
     "Issue",
     "IssueStatus",
     "IssuePriority",
@@ -28,5 +32,8 @@ __all__ = [
     "IssueHistory",
     "IssueComment",
     "Sprint",
+    "IssueAttachment",
+    "TroubleshootingSession",
+    "TroubleshootingAnswer",
 ]
 

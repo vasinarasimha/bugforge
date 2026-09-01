@@ -13,11 +13,16 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     cors_origins: str = Field(default="http://localhost:5173,http://127.0.0.1:5173")
     groq_api_key: str = ""
+    hf_token: str = ""
 
     # Semantic similarity thresholds (cosine similarity, 0-1)
     similarity_threshold: float = 0.60
     duplicate_threshold: float = 0.85
     similar_defects_limit: int = 10
+
+    # AI Troubleshooting / Root-Cause Analysis
+    root_cause_confidence_threshold: float = 0.85
+    troubleshooting_max_questions: int = 10
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

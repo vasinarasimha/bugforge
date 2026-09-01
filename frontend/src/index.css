@@ -804,6 +804,8 @@ html {
   position: fixed;
   inset: 0 auto 0 0;
   width: 260px;
+  height: 100vh;
+  height: 100dvh;
   z-index: 1050;
   display: flex;
   flex-direction: column;
@@ -812,6 +814,7 @@ html {
   transition: transform .25s ease;
   backdrop-filter: blur(5px);
   box-shadow: 4px 0 12px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
 }
 
 .app-sidebar:hover {
@@ -842,6 +845,7 @@ html {
   background: linear-gradient(to bottom, #fff, #f8f9ff);
   position: relative;
   z-index: 2;
+  flex-shrink: 0;
 }
 
 .brand-icon {
@@ -881,23 +885,42 @@ html {
 }
 
 .sidebar-nav {
-  padding: 22px 13px;
-  display: grid;
-  gap: 6px;
+  padding: 18px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 5px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
 }
 
 .sidebar-link {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 11px 13px;
+  padding: 10px 13px;
   border-radius: 9px;
   color: #5f6f86;
   font-weight: 550;
-  font-size: .93rem;
+  font-size: .92rem;
   transition: .18s ease;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .sidebar-link::before {
@@ -939,14 +962,18 @@ html {
 }
 
 .sidebar-footer {
+  flex-shrink: 0;
   margin-top: auto;
-  padding: 18px 14px;
+  padding: 14px;
   border-top: 1px solid #eef1f6;
   background: #f8f9ff;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
 }
 
 .sidebar-section-label {
-  margin: 0 0 10px 5px;
+  margin: 8px 0 6px 6px;
   color: #98a3b5;
   font-size: .68rem;
   font-weight: 750;
@@ -962,6 +989,49 @@ html {
   border: 0;
   background: #0f172a70;
   backdrop-filter: blur(2px);
+}
+
+/* High Contrast Role Badges */
+.badge-role-team-leader {
+  background-color: #f3e8ff !important;
+  color: #6b21a8 !important;
+  border: 1px solid #d8b4fe !important;
+  font-weight: 600;
+}
+
+.badge-role-admin {
+  background-color: #fee2e2 !important;
+  color: #b91c1c !important;
+  border: 1px solid #fca5a5 !important;
+  font-weight: 600;
+}
+
+.badge-role-developer {
+  background-color: #dbeafe !important;
+  color: #1d4ed8 !important;
+  border: 1px solid #93c5fd !important;
+  font-weight: 600;
+}
+
+.badge-role-qa {
+  background-color: #dcfce7 !important;
+  color: #15803d !important;
+  border: 1px solid #86efac !important;
+  font-weight: 600;
+}
+
+.badge-role-reporter {
+  background-color: #e0f2fe !important;
+  color: #0369a1 !important;
+  border: 1px solid #7dd3fc !important;
+  font-weight: 600;
+}
+
+.badge-role-pm {
+  background-color: #fef3c7 !important;
+  color: #b45309 !important;
+  border: 1px solid #fcd34d !important;
+  font-weight: 600;
 }
 
 /* Enhanced Top Navbar */

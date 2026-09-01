@@ -72,7 +72,7 @@ export default function LoginPage() {
 
         {/* Right — form */}
         <section className="login-panel">
-          <form className="auth-card" onSubmit={handleSubmit}>
+          <form className="auth-card" onSubmit={handleSubmit} autoComplete="off">
             <div style={{ textAlign: 'left', marginBottom: '20px' }}>
               <img src="/logo.png" alt="BugForge Logo" style={{ height: 48, objectFit: 'contain' }} />
             </div>
@@ -92,7 +92,7 @@ export default function LoginPage() {
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 placeholder="developer@company.com"
                 required
-                autoComplete="email"
+                autoComplete="off"
               />
             </label>
             <label>
@@ -104,7 +104,7 @@ export default function LoginPage() {
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
                   placeholder="••••••••"
                   required
-                  autoComplete="current-password"
+                  autoComplete="off"
                   style={{ paddingRight: '40px', width: '100%' }}
                 />
                 <button
@@ -127,8 +127,8 @@ export default function LoginPage() {
                 <>Sign in to Workspace <i className="bi bi-arrow-right" /></>
               )}
             </button>
-            <p className="auth-link">
-              New to BugForge? <Link to="/register">Create an account</Link>
+            <p className="auth-link text-muted" style={{ fontSize: '0.82rem', marginTop: '16px' }}>
+              <i className="bi bi-shield-lock me-1" /> Authorized personnel access only. Accounts are managed by workspace administrators.
             </p>
           </form>
         </section>
