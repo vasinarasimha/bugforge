@@ -172,6 +172,17 @@ class IssueService:
                     new_u = db.query(UserModel).filter(UserModel.id == value).first()
                     old_str = old_u.full_name if old_u else old_str
                     new_str = new_u.full_name if new_u else new_str
+                elif field == 'reporter_id':
+                    old_u = db.query(UserModel).filter(UserModel.id == old_value).first()
+                    new_u = db.query(UserModel).filter(UserModel.id == value).first()
+                    old_str = old_u.full_name if old_u else old_str
+                    new_str = new_u.full_name if new_u else new_str
+                elif field == 'project_id':
+                    from app.models.project import Project
+                    old_p = db.query(Project).filter(Project.id == old_value).first() if old_value else None
+                    new_p = db.query(Project).filter(Project.id == value).first() if value else None
+                    old_str = old_p.name if old_p else old_str
+                    new_str = new_p.name if new_p else new_str
                 elif field == 'sprint_id':
                     from app.models.sprint import Sprint
                     old_sp = db.query(Sprint).filter(Sprint.id == old_value).first() if old_value else None
@@ -426,6 +437,17 @@ class IssueService:
                     new_u = db.query(UserModel).filter(UserModel.id == new_value).first() if new_value is not None else None
                     old_str = old_u.full_name if old_u else old_str
                     new_str = new_u.full_name if new_u else new_str
+                elif field == 'reporter_id':
+                    old_u = db.query(UserModel).filter(UserModel.id == old_value).first() if old_value is not None else None
+                    new_u = db.query(UserModel).filter(UserModel.id == new_value).first() if new_value is not None else None
+                    old_str = old_u.full_name if old_u else old_str
+                    new_str = new_u.full_name if new_u else new_str
+                elif field == 'project_id':
+                    from app.models.project import Project
+                    old_p = db.query(Project).filter(Project.id == old_value).first() if old_value is not None else None
+                    new_p = db.query(Project).filter(Project.id == new_value).first() if new_value is not None else None
+                    old_str = old_p.name if old_p else old_str
+                    new_str = new_p.name if new_p else new_str
                 elif field == 'sprint_id':
                     from app.models.sprint import Sprint
                     old_sp = db.query(Sprint).filter(Sprint.id == old_value).first() if old_value is not None else None

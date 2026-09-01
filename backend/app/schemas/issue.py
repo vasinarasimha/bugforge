@@ -97,6 +97,7 @@ class IssueResponse(BaseModel):
     reporter_name: str
     assigned_to: int | None
     assignee: str | None = None
+    ai_root_cause_session_id: int | None = None
     created_at: datetime
     updated_at: datetime
     is_active: bool

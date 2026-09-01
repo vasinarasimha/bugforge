@@ -98,14 +98,14 @@ export default function ReporterDashboard() {
       {modal === 'issue' && (
         <div className="modal d-block">
           <div className="modal-dialog">
-            <form className="modal-content" onSubmit={saveIssue}>
+            <form className="modal-content" onSubmit={saveIssue} autoComplete="off">
               <div className="modal-header">
                 <h5 className="modal-title">New Issue</h5>
                 <button type="button" className="btn-close" onClick={() => setModal(null)} />
               </div>
               <div className="modal-body">
-                <input required className="form-control" placeholder="Title" value={issueForm.title} onChange={(e) => setIssueForm({ ...issueForm, title: e.target.value })} />
-                <textarea required className="form-control" placeholder="Description" value={issueForm.description} onChange={(e) => setIssueForm({ ...issueForm, description: e.target.value })} />
+                <input required className="form-control" placeholder="Title" value={issueForm.title} autoComplete="off" onChange={(e) => setIssueForm({ ...issueForm, title: e.target.value })} />
+                <textarea required className="form-control" placeholder="Description" value={issueForm.description} autoComplete="off" onChange={(e) => setIssueForm({ ...issueForm, description: e.target.value })} />
                 <select required className="if-select" value={issueForm.project_id} onChange={(e) => setIssueForm({ ...issueForm, project_id: e.target.value })}>
                   <option value="">Select project</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.project_name}</option>)}

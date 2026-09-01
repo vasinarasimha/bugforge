@@ -16,8 +16,7 @@ export default function HomePage() {
           BugForge
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <Link className="btn btn-outline-primary btn-sm" to="/login">Sign in</Link>
-          <Link className="btn btn-primary btn-sm" to="/register">Get started</Link>
+          <Link className="btn btn-primary btn-sm" to="/login">Sign in to Workspace</Link>
         </div>
       </nav>
 
@@ -37,13 +36,9 @@ export default function HomePage() {
             Manage defects, monitor progress, and collaborate from one elegant workspace.
           </p>
           <div className="hero-actions">
-            <Link className="hero-button btn-primary-hero" to="/register">
-              <i className="bi bi-rocket-takeoff" />
-              Start for free
-            </Link>
-            <Link className="hero-button btn-outline-hero" to="/login">
-              Sign in
-              <i className="bi bi-arrow-right" />
+            <Link className="hero-button btn-primary-hero" to="/login">
+              <i className="bi bi-box-arrow-in-right" />
+              Sign in to Workspace
             </Link>
           </div>
         </div>

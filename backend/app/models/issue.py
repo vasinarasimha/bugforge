@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.label import IssueLabel
     from app.models.sprint import Sprint
     from app.models.attachment import IssueAttachment
+    from app.models.troubleshooting import TroubleshootingSession
 
 
 class IssueStatus(Base):
@@ -81,6 +82,11 @@ class Issue(Base):
     
     embedding_vector = mapped_column(Vector(384), nullable=True)
 
+    # AI Root-Cause Analysis session (populated when created via troubleshooting flow)
+    ai_root_cause_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("troubleshooting_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
@@ -97,3 +103,4 @@ class Issue(Base):
     labels: Mapped[list["IssueLabel"]] = relationship(secondary="issue_label_mapping", back_populates="issues")
     sprint: Mapped["Sprint | None"] = relationship(back_populates="issues")
     attachments: Mapped[list["IssueAttachment"]] = relationship(back_populates="issue", cascade="all, delete-orphan")
+    ai_root_cause_session: Mapped["TroubleshootingSession | None"] = relationship()
