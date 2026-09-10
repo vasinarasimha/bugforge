@@ -20,7 +20,7 @@ class EmbeddingService:
 
     @property
     def model(self):
-        if self._model is None:
+        if self._model is None and not getattr(self, "_model_disabled", False):
             try:
                 from sentence_transformers import SentenceTransformer
                 logger.info("Loading all-MiniLM-L6-v2 model...")
@@ -29,7 +29,13 @@ class EmbeddingService:
             except Exception as e:
                 logger.error(f"Failed to load all-MiniLM-L6-v2 model: {e}")
                 self._model = None
+                self._model_disabled = True
         return self._model
+
+    @model.setter
+    def model(self, value):
+        self._model = value
+        self._model_disabled = (value is None)
 
     def embed_text(self, text: str) -> Optional[list[float]]:
         """

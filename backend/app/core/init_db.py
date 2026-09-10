@@ -58,11 +58,35 @@ def init_db() -> None:
             db.add(CompanySettings(company_id=default_company.id, settings={}))
         company_id = default_company.id
 
-        # 1. Issue Statuses (global)
-        statuses = ["Open", "In Progress", "Resolved", "Closed"]
-        for name in statuses:
-            if not db.query(IssueStatus).filter(IssueStatus.name == name).first():
-                db.add(IssueStatus(name=name, is_active=True))
+        # 1. Issue Statuses (company default & global fallback)
+        default_statuses = [
+            {"name": "Open", "category": "open", "color": "#3b82f6", "order_index": 1, "is_initial": True, "is_final": False},
+            {"name": "In Progress", "category": "in_progress", "color": "#8b5cf6", "order_index": 2, "is_initial": False, "is_final": False},
+            {"name": "Resolved", "category": "resolved", "color": "#10b981", "order_index": 3, "is_initial": False, "is_final": False},
+            {"name": "Verified", "category": "resolved", "color": "#06b6d4", "order_index": 4, "is_initial": False, "is_final": False},
+            {"name": "Closed", "category": "closed", "color": "#64748b", "order_index": 5, "is_initial": False, "is_final": True},
+        ]
+        for s_def in default_statuses:
+            existing = db.query(IssueStatus).filter(
+                IssueStatus.name == s_def["name"],
+                (IssueStatus.company_id == company_id) | (IssueStatus.company_id.is_(None))
+            ).first()
+            if not existing:
+                db.add(IssueStatus(
+                    name=s_def["name"],
+                    category=s_def["category"],
+                    color=s_def["color"],
+                    order_index=s_def["order_index"],
+                    is_initial=s_def["is_initial"],
+                    is_final=s_def["is_final"],
+                    is_active=True,
+                    company_id=company_id,
+                ))
+            else:
+                if existing.category != s_def["category"]:
+                    existing.category = s_def["category"]
+                if existing.company_id is None:
+                    existing.company_id = company_id
 
         # 2. Issue Priorities (global)
         priorities = ["Low", "Medium", "High", "Critical"]

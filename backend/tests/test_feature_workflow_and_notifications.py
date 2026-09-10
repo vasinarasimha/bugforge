@@ -51,6 +51,33 @@ def workflow_setup(db_session: Session):
         db_session.add(bugforge)
         db_session.flush()
 
+    # Ensure default statuses exist for BugForge company
+    status_defs = [
+        {"name": "Open", "category": "open", "order_index": 1, "is_initial": True, "is_final": False},
+        {"name": "In Progress", "category": "in_progress", "order_index": 2, "is_initial": False, "is_final": False},
+        {"name": "Resolved", "category": "resolved", "order_index": 3, "is_initial": False, "is_final": False},
+        {"name": "Verified", "category": "resolved", "order_index": 4, "is_initial": False, "is_final": False},
+        {"name": "Closed", "category": "closed", "order_index": 5, "is_initial": False, "is_final": True},
+    ]
+    for s_def in status_defs:
+        st = db_session.query(IssueStatus).filter(
+            IssueStatus.company_id == bugforge.id,
+            IssueStatus.name == s_def["name"]
+        ).first()
+        if not st:
+            db_session.add(IssueStatus(
+                name=s_def["name"],
+                category=s_def["category"],
+                order_index=s_def["order_index"],
+                is_initial=s_def["is_initial"],
+                is_final=s_def["is_final"],
+                is_active=True,
+                company_id=bugforge.id,
+            ))
+        elif st.category != s_def["category"]:
+            st.category = s_def["category"]
+    db_session.flush()
+
     # 2. Roles
     roles_dict = {}
     for role_name in ["Super Admin", "Admin", "Project Manager", "Team Leader", "Developer", "QA"]:

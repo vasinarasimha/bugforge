@@ -798,6 +798,32 @@ class IssueService:
                 IssueStatus.is_active == True,
                 IssueStatus.category == "resolved"
             ).first()
+            if not res_status:
+                res_status = db.query(IssueStatus).filter(
+                    IssueStatus.company_id == issue.company_id,
+                    IssueStatus.is_active == True,
+                    (IssueStatus.name.ilike("%resolved%")) | (IssueStatus.name.ilike("%verified%"))
+                ).first()
+            if not res_status:
+                res_status = db.query(IssueStatus).filter(
+                    IssueStatus.is_active == True,
+                    IssueStatus.category == "resolved"
+                ).first()
+            if not res_status:
+                res_status = db.query(IssueStatus).filter(
+                    IssueStatus.is_active == True,
+                    (IssueStatus.name.ilike("%resolved%")) | (IssueStatus.name.ilike("%verified%"))
+                ).first()
+            if not res_status:
+                res_status = IssueStatus(
+                    name="Resolved",
+                    category="resolved",
+                    color="#10b981",
+                    company_id=issue.company_id,
+                    is_active=True
+                )
+                db.add(res_status)
+                db.flush()
             if res_status:
                 issue.status_id = res_status.id
         elif qa_state == "Requires Rework":
@@ -806,6 +832,32 @@ class IssueService:
                 IssueStatus.is_active == True,
                 IssueStatus.category == "in_progress"
             ).first()
+            if not in_prog_status:
+                in_prog_status = db.query(IssueStatus).filter(
+                    IssueStatus.company_id == issue.company_id,
+                    IssueStatus.is_active == True,
+                    IssueStatus.name.ilike("%progress%")
+                ).first()
+            if not in_prog_status:
+                in_prog_status = db.query(IssueStatus).filter(
+                    IssueStatus.is_active == True,
+                    IssueStatus.category == "in_progress"
+                ).first()
+            if not in_prog_status:
+                in_prog_status = db.query(IssueStatus).filter(
+                    IssueStatus.is_active == True,
+                    IssueStatus.name.ilike("%progress%")
+                ).first()
+            if not in_prog_status:
+                in_prog_status = IssueStatus(
+                    name="In Progress",
+                    category="in_progress",
+                    color="#8b5cf6",
+                    company_id=issue.company_id,
+                    is_active=True
+                )
+                db.add(in_prog_status)
+                db.flush()
             if in_prog_status:
                 issue.status_id = in_prog_status.id
 
