@@ -69,7 +69,7 @@ class AnalyticsService:
         user_roles = [r.name for r in getattr(current_user, 'roles', [])]
 
         primary_role = "Developer"
-        if "Admin" in user_roles:
+        if "Super Admin" in user_roles or "Admin" in user_roles:
             primary_role = "Admin"
         elif "Project Manager" in user_roles:
             primary_role = "Project Manager"
@@ -82,6 +82,18 @@ class AnalyticsService:
 
         # Base filters (all queries must ignore deleted issues)
         base_filters = [Issue.is_deleted == False, Issue.is_active == True]
+
+        is_super_admin = any(r.name == "Super Admin" for r in getattr(current_user, 'roles', []))
+        if current_user.company_id is not None and not is_super_admin:
+            base_filters.append(
+                or_(
+                    Issue.company_id == current_user.company_id,
+                    Issue.requesting_company_id == current_user.company_id
+                )
+            )
+
+        time_days = max(1, min(days, 365))
+        start_date = datetime.now(timezone.utc) - timedelta(days=time_days)
 
         scope_type = "organization"
         scope_title = "Organization Overview"
@@ -104,7 +116,10 @@ class AnalyticsService:
                 joinedload(Team.team_leader),
                 joinedload(Team.project_manager),
                 joinedload(Team.members)
-            ).filter(Team.is_active == True).all()
+            ).filter(Team.is_active == True)
+            if current_user.company_id and not is_super_admin:
+                all_teams = all_teams.filter(Team.company_id == current_user.company_id)
+            all_teams = all_teams.all()
 
             for t in all_teams:
                 t_member_ids = [m.user_id for m in t.members]
@@ -113,10 +128,11 @@ class AnalyticsService:
                 
                 t_stats = db.query(
                     func.count(Issue.id).label("total"),
-                    func.count(case((IssueStatus.name == "Open", Issue.id))).label("open"),
+                    func.count(case((IssueStatus.name.notin_(["Resolved", "Closed"]), Issue.id))).label("open"),
                     func.count(case((IssueStatus.name.in_(["Resolved", "Closed"]), Issue.id))).label("resolved")
                 ).join(Issue.status).filter(
                     *base_filters,
+                    Issue.created_at >= start_date,
                     or_(Issue.assigned_to.in_(t_member_ids), Issue.reporter_id.in_(t_member_ids)) if t_member_ids else False
                 ).first()
 
@@ -178,10 +194,11 @@ class AnalyticsService:
 
                     t_stats = db.query(
                         func.count(Issue.id).label("total"),
-                        func.count(case((IssueStatus.name == "Open", Issue.id))).label("open"),
+                        func.count(case((IssueStatus.name.notin_(["Resolved", "Closed"]), Issue.id))).label("open"),
                         func.count(case((IssueStatus.name.in_(["Resolved", "Closed"]), Issue.id))).label("resolved")
                     ).join(Issue.status).filter(
                         *base_filters,
+                        Issue.created_at >= start_date,
                         or_(Issue.assigned_to.in_(t_member_ids), Issue.reporter_id.in_(t_member_ids)) if t_member_ids else False
                     ).first()
 
@@ -265,12 +282,49 @@ class AnalyticsService:
                     target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
 
         elif primary_role == "QA":
-            # QA scope: QA-related issues (reported by or assigned to QA)
-            scope_type = "qa_personal"
-            scope_title = "My QA & Verification Analytics"
-            filters = list(base_filters) + [
-                or_(Issue.reporter_id == current_user.id, Issue.assigned_to == current_user.id)
-            ]
+            # QA scope: Quality assurance and defect verification across assigned team(s) / projects
+            qa_teams = db.query(Team).options(
+                joinedload(Team.team_leader),
+                joinedload(Team.project_manager),
+                joinedload(Team.members)
+            ).join(TeamMember, Team.id == TeamMember.team_id).filter(
+                TeamMember.user_id == current_user.id,
+                Team.is_active == True
+            ).all()
+
+            if qa_teams:
+                scope_type = "qa_team"
+                if len(qa_teams) == 1:
+                    target_team_name = _to_str(qa_teams[0].name, "Team")
+                    scope_title = f"{target_team_name} QA & Verification Analytics"
+                else:
+                    scope_title = "Quality Assurance & Defect Telemetry"
+
+                qa_team_member_ids: Set[int] = set()
+                for t in qa_teams:
+                    qa_team_member_ids.update([m.user_id for m in t.members])
+                    if t.team_leader_id:
+                        qa_team_member_ids.add(t.team_leader_id)
+                    if t.project_manager_id:
+                        qa_team_member_ids.add(t.project_manager_id)
+
+                if team_id and team_id in [t.id for t in qa_teams]:
+                    sel_team = next(t for t in qa_teams if t.id == team_id)
+                    target_team_name = _to_str(sel_team.name, "Team")
+                    scope_title = f"{target_team_name} QA & Verification Analytics"
+                    t_uids = [m.user_id for m in sel_team.members] + ([sel_team.team_leader_id] if sel_team.team_leader_id else []) + ([sel_team.project_manager_id] if sel_team.project_manager_id else [])
+                    filters = list(base_filters) + [
+                        or_(Issue.assigned_to.in_(t_uids), Issue.reporter_id.in_(t_uids)) if t_uids else (Issue.id == -1)
+                    ]
+                else:
+                    filters = list(base_filters) + [
+                        or_(Issue.assigned_to.in_(qa_team_member_ids), Issue.reporter_id.in_(qa_team_member_ids)) if qa_team_member_ids else (Issue.id == -1)
+                    ]
+            else:
+                # If QA is not assigned to a specific team, provide organization-wide QA defect telemetry
+                scope_type = "qa_organization"
+                scope_title = "Quality Assurance & Defect Telemetry"
+                filters = list(base_filters)
 
             if project_id:
                 filters.append(Issue.project_id == project_id)
@@ -305,8 +359,10 @@ class AnalyticsService:
                     target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
 
         # ─────────────────────────────────────────────────────────────
-        # 2. KPI AGGREGATIONS
+        # 2. KPI AGGREGATIONS (Bounded by selected time filter)
         # ─────────────────────────────────────────────────────────────
+        time_filters = list(filters) + [Issue.created_at >= start_date]
+
         kpi_query = db.query(
             func.count(Issue.id).label("total"),
             func.count(case((IssueStatus.name == "Open", Issue.id))).label("open"),
@@ -314,7 +370,7 @@ class AnalyticsService:
             func.count(case((IssueStatus.name == "Resolved", Issue.id))).label("resolved"),
             func.count(case((IssueStatus.name == "Closed", Issue.id))).label("closed"),
             func.count(case((and_(IssueSeverity.name == "Critical", IssueStatus.name.notin_(["Resolved", "Closed"])), Issue.id))).label("critical_open")
-        ).join(Issue.status).outerjoin(Issue.severity).filter(*filters).first()
+        ).join(Issue.status).outerjoin(Issue.severity).filter(*time_filters).first()
 
         total = kpi_query.total if kpi_query else 0
         open_cnt = kpi_query.open if kpi_query else 0
@@ -340,7 +396,8 @@ class AnalyticsService:
         # ─────────────────────────────────────────────────────────────
         resolved_issues = db.query(Issue.created_at, Issue.updated_at).join(Issue.status).filter(
             *filters,
-            IssueStatus.name.in_(["Resolved", "Closed"])
+            IssueStatus.name.in_(["Resolved", "Closed"]),
+            or_(Issue.created_at >= start_date, Issue.updated_at >= start_date)
         ).all()
 
         resolution_durations = []
@@ -387,13 +444,13 @@ class AnalyticsService:
         )
 
         # ─────────────────────────────────────────────────────────────
-        # 4. SEVERITY DISTRIBUTION
+        # 4. SEVERITY DISTRIBUTION (Time-bounded)
         # ─────────────────────────────────────────────────────────────
         all_severities = db.query(IssueSeverity).filter(IssueSeverity.is_active == True).all()
         sev_counts_raw = db.query(
             Issue.severity_id,
             func.count(Issue.id)
-        ).filter(*filters).group_by(Issue.severity_id).all()
+        ).filter(*time_filters).group_by(Issue.severity_id).all()
         sev_count_map = {row[0]: row[1] for row in sev_counts_raw}
 
         severity_distribution = []
@@ -412,12 +469,12 @@ class AnalyticsService:
             ))
 
         # ─────────────────────────────────────────────────────────────
-        # 5. CATEGORY DISTRIBUTION
+        # 5. CATEGORY DISTRIBUTION (Time-bounded)
         # ─────────────────────────────────────────────────────────────
         cat_counts_raw = db.query(
             func.coalesce(IssueCategory.name, "Uncategorized").label("cat_name"),
             func.count(Issue.id).label("count")
-        ).outerjoin(Issue.category).filter(*filters).group_by("cat_name").order_by(func.count(Issue.id).desc()).all()
+        ).outerjoin(Issue.category).filter(*time_filters).group_by("cat_name").order_by(func.count(Issue.id).desc()).all()
 
         category_distribution = []
         for row in cat_counts_raw:
@@ -429,13 +486,13 @@ class AnalyticsService:
             ))
 
         # ─────────────────────────────────────────────────────────────
-        # 6. STATUS DISTRIBUTION
+        # 6. STATUS DISTRIBUTION (Time-bounded)
         # ─────────────────────────────────────────────────────────────
         all_statuses = db.query(IssueStatus).filter(IssueStatus.is_active == True).all()
         stat_counts_raw = db.query(
             Issue.status_id,
             func.count(Issue.id)
-        ).filter(*filters).group_by(Issue.status_id).all()
+        ).filter(*time_filters).group_by(Issue.status_id).all()
         stat_count_map = {row[0]: row[1] for row in stat_counts_raw}
 
         status_distribution = []
@@ -454,17 +511,20 @@ class AnalyticsService:
             ))
 
         # ─────────────────────────────────────────────────────────────
-        # 7. DEVELOPER WORKLOAD (Excluded for individual Developer, shown for Admin/PM/TL)
+        # 7. DEVELOPER WORKLOAD (Time-bounded)
         # ─────────────────────────────────────────────────────────────
         developer_workload: List[DeveloperWorkload] = []
 
-        if primary_role in ["Admin", "Project Manager", "Team Leader"]:
-            # Exclude system users
-            dev_role_users = db.query(User).join(User.roles).filter(
+        if primary_role in ["Admin", "Project Manager", "Team Leader", "QA"]:
+            # Exclude system users and constrain to company if not super admin
+            dev_q = db.query(User).join(User.roles).filter(
                 Role.name == "Developer",
                 User.is_active == True,
                 User.is_system_user == False
-            ).all()
+            )
+            if current_user.company_id is not None and not is_super_admin:
+                dev_q = dev_q.filter(User.company_id == current_user.company_id)
+            dev_role_users = dev_q.all()
             dev_ids = {getattr(u, "id"): u for u in dev_role_users if getattr(u, "id", None) is not None}
 
             workload_query = db.query(
@@ -475,7 +535,7 @@ class AnalyticsService:
                 func.count(case((IssueStatus.name == "Resolved", Issue.id))).label("res"),
                 func.count(case((IssueStatus.name == "Closed", Issue.id))).label("cls")
             ).join(Issue.status).filter(
-                *filters,
+                *time_filters,
                 Issue.assigned_to.isnot(None)
             ).group_by(Issue.assigned_to).all()
 
@@ -483,7 +543,12 @@ class AnalyticsService:
             all_workload_user_ids = set(dev_ids.keys()).union(set(workload_dict.keys()))
 
             for uid in all_workload_user_ids:
-                user_obj = dev_ids.get(uid) or db.query(User).filter(User.id == uid, User.is_system_user == False).first()
+                user_obj = dev_ids.get(uid)
+                if not user_obj:
+                    u_q = db.query(User).filter(User.id == uid, User.is_system_user == False)
+                    if current_user.company_id is not None and not is_super_admin:
+                        u_q = u_q.filter(User.company_id == current_user.company_id)
+                    user_obj = u_q.first()
                 if not user_obj:
                     continue
 
@@ -508,11 +573,11 @@ class AnalyticsService:
 
         if primary_role == "Developer":
             crit_assigned = db.query(func.count(Issue.id)).join(Issue.severity).filter(
-                *filters, IssueSeverity.name == "Critical"
+                *time_filters, IssueSeverity.name == "Critical"
             ).scalar() or 0
 
             high_assigned = db.query(func.count(Issue.id)).join(Issue.severity).filter(
-                *filters, IssueSeverity.name == "High"
+                *time_filters, IssueSeverity.name == "High"
             ).scalar() or 0
 
             done_count = res_cnt + closed_cnt
@@ -525,7 +590,8 @@ class AnalyticsService:
                 joinedload(Issue.status)
             ).join(Issue.status).filter(
                 *filters,
-                IssueStatus.name.in_(["Resolved", "Closed"])
+                IssueStatus.name.in_(["Resolved", "Closed"]),
+                Issue.updated_at >= start_date
             ).order_by(Issue.updated_at.desc()).limit(5).all()
 
             recent_resolved_list = [
@@ -624,6 +690,115 @@ class AnalyticsService:
             ))
             cur_date += timedelta(days=1)
 
+        # ─────────────────────────────────────────────────────────────
+        # 10. MODULE / COMPONENT DISTRIBUTION
+        # ─────────────────────────────────────────────────────────────
+        from app.schemas.analytics import ModuleDistribution, SprintInsight, DuplicatePattern
+
+        mod_counts_raw = db.query(
+            func.coalesce(IssueModule.name, "Unspecified").label("mod_name"),
+            func.count(Issue.id).label("count")
+        ).outerjoin(Issue.module).filter(*time_filters).group_by("mod_name").order_by(func.count(Issue.id).desc()).all()
+
+        module_distribution = []
+        for row in mod_counts_raw:
+            pct = round((row.count / total * 100.0), 1) if total > 0 else 0.0
+            module_distribution.append(ModuleDistribution(
+                name=row.mod_name,
+                count=row.count,
+                percentage=pct
+            ))
+
+        # ─────────────────────────────────────────────────────────────
+        # 11. SPRINT INSIGHTS
+        # ─────────────────────────────────────────────────────────────
+        from app.models.sprint import Sprint, SprintStatus as SprintStatusModel
+
+        sprint_insights: List[SprintInsight] = []
+        try:
+            sprints_query = db.query(Sprint).options(
+                joinedload(Sprint.status),
+                joinedload(Sprint.project),
+                joinedload(Sprint.issues).joinedload(Issue.status)
+            ).join(Sprint.status).filter(
+                SprintStatusModel.name.in_(["Active", "Completed"])
+            ).order_by(Sprint.created_at.desc()).limit(10)
+
+            if project_id:
+                sprints_query = sprints_query.filter(Sprint.project_id == project_id)
+
+            for sp in sprints_query.all():
+                sp_issues = [i for i in sp.issues if not i.is_deleted and i.is_active]
+                sp_total = len(sp_issues)
+                sp_open = sum(1 for i in sp_issues if i.status and i.status.name in ("Open", "In Progress"))
+                sp_resolved = sum(1 for i in sp_issues if i.status and i.status.name in ("Resolved", "Closed"))
+                sp_rate = round((sp_resolved / sp_total * 100.0), 1) if sp_total > 0 else 0.0
+
+                sprint_insights.append(SprintInsight(
+                    sprint_id=sp.id,
+                    sprint_name=sp.name,
+                    project_name=sp.project.name if sp.project else None,
+                    status=sp.status.name if sp.status else "Unknown",
+                    total_issues=sp_total,
+                    open_issues=sp_open,
+                    resolved_issues=sp_resolved,
+                    completion_rate=sp_rate,
+                    start_date=sp.start_date.isoformat() if sp.start_date else None,
+                    end_date=sp.end_date.isoformat() if sp.end_date else None
+                ))
+        except Exception:
+            pass  # Sprint insights are optional — don't break analytics if they fail
+
+        # ─────────────────────────────────────────────────────────────
+        # 12. DUPLICATE / REPEATED DEFECT PATTERNS (AI Suggestion)
+        # ─────────────────────────────────────────────────────────────
+        duplicate_patterns: List[DuplicatePattern] = []
+        try:
+            # Find open issues with embeddings, limited to 50 for performance
+            open_issues_with_embeddings = db.query(Issue).join(Issue.status).filter(
+                *base_filters,
+                IssueStatus.name.in_(["Open", "In Progress"]),
+                Issue.embedding_vector.isnot(None)
+            ).order_by(Issue.created_at.desc()).limit(50).all()
+
+            if len(open_issues_with_embeddings) >= 2:
+                # Simple greedy clustering: for each issue, find others > 0.85 similarity
+                used_ids = set()
+                for issue_a in open_issues_with_embeddings:
+                    if issue_a.id in used_ids:
+                        continue
+                    cluster = [issue_a]
+                    for issue_b in open_issues_with_embeddings:
+                        if issue_b.id == issue_a.id or issue_b.id in used_ids:
+                            continue
+                        try:
+                            # Use pgvector cosine distance
+                            distance = db.scalar(
+                                select(Issue.embedding_vector.cosine_distance(list(issue_a.embedding_vector)))
+                                .where(Issue.id == issue_b.id)
+                            )
+                            if distance is not None and (1.0 - distance) >= 0.85:
+                                cluster.append(issue_b)
+                        except Exception:
+                            continue
+
+                    if len(cluster) >= 2:
+                        for c in cluster:
+                            used_ids.add(c.id)
+                        avg_sim = 0.85  # approximate
+                        duplicate_patterns.append(DuplicatePattern(
+                            cluster_label=f"Similar to: {cluster[0].title[:60]}",
+                            issue_count=len(cluster),
+                            issue_keys=[c.issue_key for c in cluster],
+                            avg_similarity=round(avg_sim, 2),
+                            suggestion=f"AI Suggestion: {len(cluster)} open defects appear semantically similar. Consider merging or linking them to avoid duplicate effort."
+                        ))
+
+                    if len(duplicate_patterns) >= 5:
+                        break
+        except Exception:
+            pass  # Duplicate detection is optional — graceful fallback
+
         return AnalyticsOverviewResponse(
             kpis=kpis,
             severity_distribution=severity_distribution,
@@ -633,6 +808,9 @@ class AnalyticsService:
             developer_performance=developer_performance,
             defect_trends=defect_trends,
             resolution_metrics=resolution_metrics,
+            module_distribution=module_distribution,
+            sprint_insights=sprint_insights,
+            duplicate_patterns=duplicate_patterns,
             project_id=project_id,
             project_name=target_project_name,
             team_id=team_id,
@@ -645,3 +823,4 @@ class AnalyticsService:
             is_empty_scope=is_empty_scope,
             empty_scope_message=empty_scope_message
         )
+

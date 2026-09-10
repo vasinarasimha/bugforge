@@ -105,7 +105,6 @@ async def get_resolution_assistance(
         # Fetch comments
         comments = db.query(IssueComment).filter(
             IssueComment.issue_id == issue_obj.id,
-            IssueComment.is_deleted == False
         ).order_by(IssueComment.created_at.desc()).limit(3).all()
         
         return {

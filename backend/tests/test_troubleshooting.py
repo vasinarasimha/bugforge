@@ -14,6 +14,7 @@ def mock_auth():
     from app.api.dependencies.auth import get_current_user
     mock_user = MagicMock(spec=User)
     mock_user.id = 1
+    mock_user.company_id = 1
     mock_user.email = "reporter@bugforge.com"
     mock_user.full_name = "Reporter User"
     mock_user.roles = []
@@ -454,6 +455,9 @@ def test_confirm_and_create_issue(mock_hf, mock_auth, sample_payload):
         mock_proj = MagicMock()
         mock_proj.id = 1
         mock_proj.key = "TEST"
+        mock_proj.company_id = 1
+        mock_proj.lead_id = 1
+        mock_proj.members = []
         MockProjectRepo.return_value.get.return_value = mock_proj
 
         mock_created_issue = MagicMock()

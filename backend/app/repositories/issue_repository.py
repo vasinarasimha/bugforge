@@ -1,15 +1,37 @@
 from __future__ import annotations
+import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.issue import Issue
 
-class IssueRepository:
-    _options = (selectinload(Issue.project), selectinload(Issue.reporter), selectinload(Issue.assignee))
+logger = logging.getLogger(__name__)
 
-    def list(self, db: Session, reporter_id: int | None = None, project_ids: list[int] | None = None) -> list[Issue]:
-        print("repositories/issue_repository.py Fetching issues from the database")
+class IssueRepository:
+    _options = (
+        selectinload(Issue.project),
+        selectinload(Issue.reporter),
+        selectinload(Issue.assignee),
+        selectinload(Issue.status),
+        selectinload(Issue.priority),
+        selectinload(Issue.severity),
+        selectinload(Issue.category),
+        selectinload(Issue.module),
+        selectinload(Issue.sprint),
+        selectinload(Issue.requesting_company),
+        selectinload(Issue.team),
+        selectinload(Issue.qa_verified_by),
+    )
+
+    def list(self, db: Session, reporter_id: int | None = None, project_ids: list[int] | None = None, company_id: int | None = None, issue_type: str | None = None, requesting_company_id: int | None = None) -> list[Issue]:
+        logger.debug("Fetching issues from the database")
         stmt = select(Issue).options(*self._options).where(Issue.is_deleted == False)
+        if company_id is not None:
+            stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
+        if requesting_company_id is not None:
+            stmt = stmt.where(Issue.requesting_company_id == requesting_company_id)
+        if issue_type is not None:
+            stmt = stmt.where(Issue.issue_type == issue_type)
         if reporter_id is not None:
             stmt = stmt.where(Issue.reporter_id == reporter_id)
         if project_ids is not None:
@@ -24,19 +46,22 @@ class IssueRepository:
         )
         return list(db.scalars(stmt))
 
-    def get(self, db: Session, issue_id: int) -> Issue | None:
-        print(f"repositories/issue_repository.py Fetching issue with ID {issue_id} from the database")
-        return db.scalar(select(Issue).options(*self._options).where(Issue.id == issue_id, Issue.is_deleted == False))
+    def get(self, db: Session, issue_id: int, company_id: int | None = None) -> Issue | None:
+        logger.debug(f"Fetching issue with ID {issue_id} from the database")
+        stmt = select(Issue).options(*self._options).where(Issue.id == issue_id, Issue.is_deleted == False)
+        if company_id is not None:
+            stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
+        return db.scalar(stmt)
 
     def create(self, db: Session, issue: Issue) -> Issue:
-        print(f"repositories/issue_repository.py Creating a new issue with title '{issue.title}' in the database")
+        logger.debug(f"Creating a new issue with title '{issue.title}' in the database")
         db.add(issue)
         db.commit()
         db.refresh(issue)
         return self.get(db, issue.id)
 
     def delete(self, db: Session, issue: Issue) -> None:
-        print(f"repositories/issue_repository.py Soft-deleting issue with ID {issue.id} from the database")
+        logger.debug(f"Soft-deleting issue with ID {issue.id} from the database")
         issue.is_deleted = True
         db.commit()
 
@@ -49,6 +74,7 @@ class IssueRepository:
         status_ids: list[int] | None = None,
         similarity_threshold: float = 0.60,
         limit: int = 10,
+        company_id: int | None = None,
     ) -> list[tuple[Issue, float]]:
         """
         Find similar issues using pgvector cosine distance at the database level.
@@ -69,6 +95,8 @@ class IssueRepository:
             )
         )
 
+        if company_id is not None:
+            stmt = stmt.where(Issue.company_id == company_id)
         if exclude_issue_id is not None:
             stmt = stmt.where(Issue.id != exclude_issue_id)
         if project_id is not None:
@@ -89,6 +117,7 @@ class IssueRepository:
         project_id: int | None = None,
         similarity_threshold: float = 0.60,
         limit: int = 20,
+        company_id: int | None = None,
     ) -> list[tuple[Issue, float]]:
         """
         Search issues by semantic similarity to a query embedding.
@@ -109,6 +138,8 @@ class IssueRepository:
             )
         )
 
+        if company_id is not None:
+            stmt = stmt.where(Issue.company_id == company_id)
         if exclude_issue_id is not None:
             stmt = stmt.where(Issue.id != exclude_issue_id)
         if project_id is not None:

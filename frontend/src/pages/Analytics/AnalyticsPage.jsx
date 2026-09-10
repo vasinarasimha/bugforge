@@ -3,6 +3,7 @@ import { getAnalyticsOverview } from '../../services/analyticsService'
 import { getProjects } from '../../services/projectService'
 import { getTeams } from '../../services/teamService'
 import { useAuth } from '../../hooks/useAuth'
+import SuperAdminAnalyticsPage from '../SuperAdmin/SuperAdminAnalyticsPage'
 
 // Helper for SVG donut slice calculations
 function createDonutArcs(items, total, radius, innerRadius, cx, cy) {
@@ -35,6 +36,12 @@ function createDonutArcs(items, total, radius, innerRadius, cx, cy) {
 
 export default function AnalyticsPage() {
   const { user } = useAuth()
+  const isSuperAdmin = user?.role === 'Super Admin' || user?.roles?.some((r) => r.name === 'Super Admin')
+
+  if (isSuperAdmin) {
+    return <SuperAdminAnalyticsPage />
+  }
+
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -80,6 +87,9 @@ export default function AnalyticsPage() {
   const devPerf = data?.developer_performance
   const resolutionMetrics = data?.resolution_metrics
   const scopeTeams = data?.scope_teams || []
+  const modules = data?.module_distribution || []
+  const sprintInsights = data?.sprint_insights || []
+  const duplicatePatterns = data?.duplicate_patterns || []
   const role = data?.user_role || user?.role || 'Developer'
   const scopeTitle = data?.scope_title || 'Analytics & Performance'
   const isEmptyScope = Boolean(data?.is_empty_scope)
@@ -114,6 +124,7 @@ export default function AnalyticsPage() {
   // Subtitle per role
   const getRoleSubtitle = () => {
     switch (role) {
+      case 'Super Admin':
       case 'Admin':
         return 'Organization-wide defect lifecycle metrics, cross-team performance, and telemetry.'
       case 'Project Manager':
@@ -152,8 +163,8 @@ export default function AnalyticsPage() {
         </div>
 
         <div className="analytics-toolbar">
-          {/* Team Filter for PM or Admin (when scope teams available) */}
-          {(role === 'Project Manager' || role === 'Admin') && scopeTeams.length > 0 && (
+          {/* Team Filter for PM or Admin / Super Admin (when scope teams available) */}
+          {(role === 'Project Manager' || role === 'Admin' || role === 'Super Admin') && scopeTeams.length > 0 && (
             <div className="analytics-select-wrap">
               <i className="bi bi-diagram-3" />
               <select
@@ -327,7 +338,7 @@ export default function AnalyticsPage() {
       </section>
 
       {/* ── PM / ADMIN: Managed Team Performance Cards ── */}
-      {(role === 'Project Manager' || role === 'Admin') && scopeTeams.length > 0 && !selectedTeam && (
+      {(role === 'Project Manager' || role === 'Admin' || role === 'Super Admin') && scopeTeams.length > 0 && !selectedTeam && (
         <section className="mb-4">
           <div className="card border-0 shadow-sm" style={{ borderRadius: '16px' }}>
             <div className="card-header bg-transparent border-0 pt-4 px-4 pb-2">
@@ -1098,6 +1109,186 @@ export default function AnalyticsPage() {
               </div>
             </div>
           </div>
+
+          {/* ── Module / Component Distribution ── */}
+          {modules.length > 0 && (
+            <div className="analytics-panel">
+              <div className="panel-header">
+                <div>
+                  <h3>Module / Component Distribution</h3>
+                  <p>Most affected system modules by defect count</p>
+                </div>
+              </div>
+              <div className="panel-body" style={{ padding: '1.25rem' }}>
+                {modules.map((mod, idx) => (
+                  <div key={idx} style={{ marginBottom: '0.75rem' }}>
+                    <div className="d-flex justify-content-between mb-1">
+                      <span style={{ fontWeight: 500, fontSize: '0.85rem' }}>{mod.name}</span>
+                      <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                        {mod.count} ({mod.percentage}%)
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        height: '8px',
+                        background: 'var(--surface-2, #e2e8f0)',
+                        borderRadius: '4px',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${Math.max(mod.percentage, 2)}%`,
+                          height: '100%',
+                          background: ['#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe'][idx % 5],
+                          borderRadius: '4px',
+                          transition: 'width 0.5s ease',
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Sprint Insights ── */}
+          {sprintInsights.length > 0 && (
+            <div className="analytics-panel">
+              <div className="panel-header">
+                <div>
+                  <h3>Sprint Insights</h3>
+                  <p>Completion rates and defect metrics for recent sprints</p>
+                </div>
+              </div>
+              <div className="panel-body" style={{ padding: '1.25rem', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--surface-2, #e2e8f0)' }}>
+                      <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600 }}>Sprint</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600 }}>Project</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600 }}>Status</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600 }}>Issues</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'center', fontWeight: 600 }}>Resolved</th>
+                      <th style={{ padding: '0.5rem', textAlign: 'left', fontWeight: 600, minWidth: '160px' }}>Completion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sprintInsights.map((sp) => (
+                      <tr key={sp.sprint_id} style={{ borderBottom: '1px solid var(--surface-2, #f1f5f9)' }}>
+                        <td style={{ padding: '0.5rem', fontWeight: 500 }}>{sp.sprint_name}</td>
+                        <td style={{ padding: '0.5rem', color: 'var(--text-muted, #64748b)' }}>{sp.project_name || '—'}</td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                          <span
+                            className="badge"
+                            style={{
+                              background: sp.status === 'Active' ? '#dbeafe' : '#dcfce7',
+                              color: sp.status === 'Active' ? '#2563eb' : '#16a34a',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {sp.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center' }}>{sp.total_issues}</td>
+                        <td style={{ padding: '0.5rem', textAlign: 'center', color: '#16a34a', fontWeight: 600 }}>
+                          {sp.resolved_issues}
+                        </td>
+                        <td style={{ padding: '0.5rem' }}>
+                          <div className="d-flex align-items-center gap-2">
+                            <div
+                              style={{
+                                flex: 1,
+                                height: '8px',
+                                background: 'var(--surface-2, #e2e8f0)',
+                                borderRadius: '4px',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${sp.completion_rate}%`,
+                                  height: '100%',
+                                  background: sp.completion_rate >= 80 ? '#10b981' : sp.completion_rate >= 50 ? '#f59e0b' : '#ef4444',
+                                  borderRadius: '4px',
+                                  transition: 'width 0.5s ease',
+                                }}
+                              />
+                            </div>
+                            <span style={{ fontSize: '0.8rem', fontWeight: 600, minWidth: '40px' }}>
+                              {sp.completion_rate}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Duplicate / Repeated Defect Patterns (AI Suggestion) ── */}
+          {duplicatePatterns.length > 0 && (
+            <div className="analytics-panel">
+              <div className="panel-header">
+                <div>
+                  <h3>
+                    <i className="bi bi-stars text-warning me-2" />
+                    Duplicate Defect Patterns
+                  </h3>
+                  <p>
+                    <span className="badge bg-warning-subtle text-warning border border-warning me-1" style={{ fontSize: '0.7rem' }}>
+                      AI SUGGESTION
+                    </span>
+                    Semantically similar open defects detected via pgvector cosine similarity
+                  </p>
+                </div>
+              </div>
+              <div className="panel-body" style={{ padding: '1.25rem' }}>
+                {duplicatePatterns.map((pattern, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      background: 'var(--surface-1, #f8fafc)',
+                      border: '1px solid var(--surface-2, #e2e8f0)',
+                      borderRadius: '0.75rem',
+                      padding: '1rem 1.25rem',
+                      marginBottom: '0.75rem',
+                    }}
+                  >
+                    <div className="d-flex justify-content-between align-items-start mb-2">
+                      <div>
+                        <strong style={{ fontSize: '0.9rem' }}>{pattern.cluster_label}</strong>
+                        <div className="d-flex gap-2 mt-1 flex-wrap">
+                          {pattern.issue_keys.map((key) => (
+                            <span
+                              key={key}
+                              className="badge bg-primary-subtle text-primary"
+                              style={{ fontSize: '0.75rem' }}
+                            >
+                              {key}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <span
+                        className="badge bg-danger-subtle text-danger"
+                        style={{ fontSize: '0.75rem', fontWeight: 600 }}
+                      >
+                        {pattern.issue_count} similar
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted, #64748b)', margin: 0 }}>
+                      <i className="bi bi-lightbulb text-warning me-1" />
+                      {pattern.suggestion}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>

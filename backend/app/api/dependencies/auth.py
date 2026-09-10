@@ -45,6 +45,8 @@ def require_role(allowed_roles: list[Any]):
 
     def role_checker(current_user: User = Depends(get_current_user)):
         user_roles = [r.name for r in getattr(current_user, "roles", [])]
+        if "Super Admin" in user_roles:
+            return current_user
         if not any(role in normalized_allowed for role in user_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

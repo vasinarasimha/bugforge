@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 
-VALID_ROLES = ["Admin", "Developer", "QA", "Reporter", "Project Manager", "Team Leader"]
+VALID_ROLES = ["Super Admin", "Admin", "Developer", "QA", "Reporter", "Project Manager", "Team Leader"]
 
 
 class RoleResponse(BaseModel):
@@ -32,6 +32,8 @@ class UserResponse(BaseModel):
     state_code: Optional[str] = None
     country: Optional[str] = None
     country_code: Optional[str] = None
+    company_id: Optional[int] = None
+    company_name: Optional[str] = None
     roles: list[RoleResponse] = Field(default_factory=list)
     role: Optional[str] = None  # Computed convenience field: first role name
     created_at: Optional[datetime] = None

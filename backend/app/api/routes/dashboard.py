@@ -3,17 +3,20 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.auth import get_current_user
 from app.api.routes.issues import serialize as issue_serialize
 from app.api.routes.projects import serialize as project_serialize
 from app.core.database import get_db
-from app.models.issue import Issue
-from app.models.sprint import Sprint
+from app.models.issue import Issue, IssueStatus, IssuePriority, IssueSeverity
+from app.models.sprint import Sprint, SprintStatus
+from app.models.team import Team, TeamMember
+from app.models.role import Role
 from app.models.user import User
 from app.models.history import IssueHistory
+from sqlalchemy.orm import joinedload, selectinload
 from app.repositories.user_repository import UserRepository
 from app.schemas.dashboard import DashboardStatistics
 from app.services.issue_service import IssueService
@@ -24,17 +27,32 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 @router.get("/statistics", response_model=DashboardStatistics)
 async def statistics(db: Annotated[Session, Depends(get_db)], _: Annotated[User, Depends(get_current_user)]):
-    projects = ProjectService().list(db)
-    issues = IssueService().list(db)
-    recent_history = db.query(IssueHistory).order_by(IssueHistory.created_at.desc()).limit(10).all()
+    from app.models.project import Project
+
+    # SQL-level aggregation instead of loading all records into memory
+    total_projects = db.query(func.count(Project.id)).filter(Project.is_active == True).scalar() or 0
+
+    issue_stats = db.query(
+        func.count(Issue.id).label("total"),
+        func.count(case((IssueStatus.name == "In Progress", Issue.id))).label("in_progress"),
+        func.count(case((IssueStatus.name == "Resolved", Issue.id))).label("resolved"),
+    ).join(Issue.status).filter(Issue.is_deleted == False, Issue.is_active == True).first()
+
+    total_issues = issue_stats.total if issue_stats else 0
+    in_progress = issue_stats.in_progress if issue_stats else 0
+    resolved = issue_stats.resolved if issue_stats else 0
+
+    # Only fetch the few records needed for display
+    projects = ProjectService().list(db, limit=5, offset=0)
+    recent_issues = IssueService().list(db)[:3]
 
     return {
-        "total_projects": len(projects),
-        "total_reported_issues": len(issues),
-        "total_in_progress": sum(1 for i in issues if i.status.name == "In Progress"),
-        "total_resolved": sum(1 for i in issues if i.status.name == "Resolved"),
+        "total_projects": total_projects,
+        "total_reported_issues": total_issues,
+        "total_in_progress": in_progress,
+        "total_resolved": resolved,
         "latest_projects": [project_serialize(p) for p in projects[:5]],
-        "recent_issues": [issue_serialize(i) for i in issues[:3]],
+        "recent_issues": [issue_serialize(i) for i in recent_issues],
     }
 
 
@@ -69,6 +87,21 @@ async def pm_stats(
     for i in pm_issues:
         issues_by_type[i.issue_type or "Defect"] += 1
 
+    # Sprints and completion rate for PM
+    pm_active_sprints = db.query(Sprint).options(
+        joinedload(Sprint.issues).joinedload(Issue.status)
+    ).join(Sprint.status).filter(
+        SprintStatus.name == "Active"
+    ).all()
+    if pm_project_ids:
+        pm_proj_sprints = [s for s in pm_active_sprints if s.project_id in pm_project_ids]
+        if pm_proj_sprints:
+            pm_active_sprints = pm_proj_sprints
+
+    total_sprint_issues = sum(len([i for i in s.issues if not i.is_deleted and i.is_active]) for s in pm_active_sprints)
+    resolved_sprint_issues = sum(sum(1 for i in s.issues if not i.is_deleted and i.is_active and i.status and i.status.name in ("Resolved", "Closed")) for s in pm_active_sprints)
+    sprint_completion_rate = round((resolved_sprint_issues / total_sprint_issues * 100)) if total_sprint_issues > 0 else 0
+
     recent_history_records = db.query(IssueHistory).join(Issue).filter(Issue.project_id.in_(pm_project_ids)).order_by(IssueHistory.created_at.desc()).limit(8).all()
     recent_history_serialized = [{"id": h.id, "field_name": h.field_name, "old_value": h.old_value, "new_value": h.new_value, "created_at": h.created_at.isoformat()} for h in recent_history_records]
 
@@ -77,8 +110,8 @@ async def pm_stats(
         "total_issues": len(pm_issues),
         "active_projects": active_projects,
         "critical_open_issues": sum(1 for i in pm_issues if i.priority and i.priority.name in ["Critical", "High"] and i.status and i.status.name == "Open"),
-        "active_sprints": [],
-        "sprint_completion_rate": 0,
+        "active_sprints": len(pm_active_sprints),
+        "sprint_completion_rate": sprint_completion_rate,
         "open_issues": open_issues,
         "in_progress_issues": in_progress_issues,
         "resolved_issues": resolved_issues,
@@ -97,7 +130,7 @@ async def tl_stats(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    """Team Leader stats — filtered to current TL's projects only."""
+    """Team Leader stats — filtered to current TL's projects and team."""
     user_roles = [r.name for r in current_user.roles]
     if "Team Leader" not in user_roles:
         raise HTTPException(status_code=403, detail="Team Leader role required")
@@ -123,14 +156,97 @@ async def tl_stats(
     for i in tl_issues:
         issues_by_type[i.issue_type or "Defect"] += 1
 
+    # 1. Team Leader's Team and Workload
+    tl_team = db.query(Team).options(
+        joinedload(Team.members).joinedload(TeamMember.user)
+    ).filter(Team.team_leader_id == current_user.id, Team.is_active == True).first()
+
+    team_members_list = []
+    if tl_team and tl_team.members:
+        team_members_list = [m.user for m in tl_team.members if m.user and not m.user.is_system_user]
+    else:
+        # Fallback to active developers
+        team_members_list = db.query(User).join(User.roles).filter(
+            Role.name == "Developer",
+            User.is_active == True,
+            User.is_system_user == False
+        ).all()
+
+    assigned_user_ids = {i.assigned_to for i in tl_issues if i.assigned_to is not None}
+    all_workload_users = {u.id: u for u in team_members_list if u}
+    for uid in assigned_user_ids:
+        if uid not in all_workload_users:
+            u_obj = db.query(User).filter(User.id == uid, User.is_system_user == False).first()
+            if u_obj:
+                all_workload_users[uid] = u_obj
+
+    team_workload = []
+    for uid, u_obj in all_workload_users.items():
+        u_issues = [i for i in tl_issues if i.assigned_to == uid]
+        u_open = sum(1 for i in u_issues if i.status and i.status.name == "Open")
+        u_in_prog = sum(1 for i in u_issues if i.status and i.status.name == "In Progress")
+        u_resolved = sum(1 for i in u_issues if i.status and i.status.name in ("Resolved", "Closed"))
+        u_total = len(u_issues)
+        team_workload.append({
+            "user_id": u_obj.id,
+            "full_name": u_obj.full_name,
+            "email": u_obj.email,
+            "open": u_open,
+            "in_progress": u_in_prog,
+            "resolved": u_resolved,
+            "total": u_total
+        })
+
+    team_workload.sort(key=lambda x: x["total"], reverse=True)
+
+    # 2. Active Sprints
+    active_sprints_query = db.query(Sprint).options(
+        joinedload(Sprint.status),
+        joinedload(Sprint.issues).joinedload(Issue.status)
+    ).join(Sprint.status).filter(
+        SprintStatus.name == "Active"
+    )
+    if tl_project_ids:
+        active_sprints_query = active_sprints_query.filter(Sprint.project_id.in_(tl_project_ids))
+
+    active_sprints_records = active_sprints_query.all()
+    if not active_sprints_records:
+        active_sprints_records = db.query(Sprint).options(
+            joinedload(Sprint.status),
+            joinedload(Sprint.issues).joinedload(Issue.status)
+        ).join(Sprint.status).filter(
+            SprintStatus.name == "Active"
+        ).all()
+
+    today_date = datetime.now(timezone.utc).date()
+    active_sprints_list = []
+    for sp in active_sprints_records:
+        sp_issues = [i for i in sp.issues if not i.is_deleted and i.is_active]
+        sp_total = len(sp_issues)
+        sp_resolved = sum(1 for i in sp_issues if i.status and i.status.name in ("Resolved", "Closed"))
+        sp_pct = round((sp_resolved / sp_total * 100)) if sp_total > 0 else 0
+        days_left = None
+        if sp.end_date:
+            days_left = (sp.end_date - today_date).days
+        active_sprints_list.append({
+            "id": sp.id,
+            "name": sp.name,
+            "start_date": sp.start_date.isoformat() if sp.start_date else (sp.created_at.strftime("%Y-%m-%d") if sp.created_at else "—"),
+            "end_date": sp.end_date.isoformat() if sp.end_date else "—",
+            "days_left": days_left,
+            "progress_pct": sp_pct,
+            "resolved_issues": sp_resolved,
+            "total_issues": sp_total
+        })
+
     recent_history_records = db.query(IssueHistory).join(Issue).filter(Issue.project_id.in_(tl_project_ids)).order_by(IssueHistory.created_at.desc()).limit(8).all()
     recent_history_serialized = [{"id": h.id, "field_name": h.field_name, "old_value": h.old_value, "new_value": h.new_value, "created_at": h.created_at.isoformat()} for h in recent_history_records]
 
     return {
         "total_projects": len(tl_projects),
-        "team_size": 0,
-        "team_workload": [],
-        "active_sprints": [],
+        "team_size": len(all_workload_users),
+        "team_workload": team_workload,
+        "active_sprints": active_sprints_list,
         "active_projects": active_projects,
         "open_issues": open_issues,
         "in_progress_issues": in_progress_issues,

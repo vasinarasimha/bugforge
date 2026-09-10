@@ -144,3 +144,30 @@ class TestAnalyticsService:
         # Requesting analytics for unauthorized project 99
         overview = service.get_overview(mock_db, mock_pm_user, project_id=99, days=30)
         assert overview.project_id == 99
+
+    def test_qa_analytics_scoping(self):
+        """QA user receives quality assurance defect telemetry for their assigned teams or organization."""
+        service = AnalyticsService()
+        mock_db = MagicMock()
+
+        qa_user = MagicMock(spec=User)
+        qa_user.id = 5
+        qa_user.email = "qa@bugforge.com"
+        qa_user.full_name = "QA Engineer"
+        qa_role = MagicMock(spec=UserRole)
+        qa_role.name = "QA"
+        qa_user.roles = [qa_role]
+
+        # Mock no teams -> fallback to qa_organization
+        mock_db.query.return_value.options.return_value.join.return_value.filter.return_value.all.return_value = []
+        mock_db.query.return_value.filter.return_value.all.return_value = []
+        mock_db.query.return_value.join.return_value.outerjoin.return_value.filter.return_value.first.return_value = None
+        mock_db.query.return_value.join.return_value.filter.return_value.all.return_value = []
+        mock_db.query.return_value.filter.return_value.group_by.return_value.all.return_value = []
+        mock_db.query.return_value.outerjoin.return_value.filter.return_value.group_by.return_value.order_by.return_value.all.return_value = []
+        mock_db.query.return_value.filter.return_value.group_by.return_value.order_by.return_value.all.return_value = []
+
+        overview = service.get_overview(mock_db, qa_user, project_id=None, days=30)
+        assert overview.user_role == "QA"
+        assert overview.scope_type == "qa_organization"
+        assert overview.scope_title == "Quality Assurance & Defect Telemetry"

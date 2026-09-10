@@ -37,6 +37,9 @@ def make_mock_user(user_id=1, email="user@bugforge.com", full_name="Test User", 
     u.country = None
     u.country_code = None
     u.roles = [make_mock_role(role_name, role_id=1)]
+    u.company_id = 1
+    u.company = None
+    u.company_name = "BugForge"
     u.created_at = None
     u.updated_at = None
     return u

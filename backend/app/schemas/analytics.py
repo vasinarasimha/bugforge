@@ -105,6 +105,36 @@ class TeamPerformanceSummary(BaseModel):
     resolution_rate_percentage: float
 
 
+class ModuleDistribution(BaseModel):
+    """Distribution of defects by affected module/component."""
+    name: str
+    count: int
+    percentage: float
+
+
+class SprintInsight(BaseModel):
+    """Sprint-level defect metrics for sprint health tracking."""
+    sprint_id: int
+    sprint_name: str
+    project_name: Optional[str] = None
+    status: str
+    total_issues: int
+    open_issues: int
+    resolved_issues: int
+    completion_rate: float
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+class DuplicatePattern(BaseModel):
+    """AI Suggestion: Cluster of similar/duplicate defects detected via semantic similarity."""
+    cluster_label: str
+    issue_count: int
+    issue_keys: List[str]
+    avg_similarity: float
+    suggestion: str
+
+
 class AnalyticsOverviewResponse(BaseModel):
     kpis: KPISummary
     severity_distribution: List[SeverityDistribution]
@@ -114,6 +144,9 @@ class AnalyticsOverviewResponse(BaseModel):
     developer_performance: Optional[DeveloperPerformanceMetrics] = None
     defect_trends: List[DefectTrendPoint]
     resolution_metrics: ResolutionTimeMetrics
+    module_distribution: List[ModuleDistribution] = []
+    sprint_insights: List[SprintInsight] = []
+    duplicate_patterns: List[DuplicatePattern] = []
     project_id: Optional[int] = None
     project_name: Optional[str] = None
     team_id: Optional[int] = None
@@ -125,3 +158,4 @@ class AnalyticsOverviewResponse(BaseModel):
     scope_teams: List[TeamPerformanceSummary] = []
     is_empty_scope: bool = False
     empty_scope_message: Optional[str] = None
+

@@ -14,17 +14,22 @@ class EmbeddingService:
     """
 
     def __init__(self):
-        try:
-            from sentence_transformers import SentenceTransformer
-            logger.info("Loading all-MiniLM-L6-v2 model...")
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')
-            logger.info("all-MiniLM-L6-v2 model loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load all-MiniLM-L6-v2 model: {e}")
-            self.model = None
-
+        self._model = None
         # all-MiniLM-L6-v2 embedding dimension
         self.dimension = 384
+
+    @property
+    def model(self):
+        if self._model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                logger.info("Loading all-MiniLM-L6-v2 model...")
+                self._model = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("all-MiniLM-L6-v2 model loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load all-MiniLM-L6-v2 model: {e}")
+                self._model = None
+        return self._model
 
     def embed_text(self, text: str) -> Optional[list[float]]:
         """

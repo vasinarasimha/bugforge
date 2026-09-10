@@ -1,4 +1,5 @@
 import { useAuth } from '../../hooks/useAuth'
+import SuperAdminDashboard from '../SuperAdmin/SuperAdminDashboard'
 import AdminDashboard from './AdminDashboard'
 import ProjectManagerDashboard from './ProjectManagerDashboard'
 import TeamLeaderDashboard from './TeamLeaderDashboard'
@@ -14,6 +15,8 @@ export default function DashboardPage() {
   const primaryRole = user.role || user.roles?.[0]?.name
 
   switch (primaryRole) {
+    case 'Super Admin':
+      return <SuperAdminDashboard />
     case 'Admin':
       return <AdminDashboard />
     case 'Project Manager':

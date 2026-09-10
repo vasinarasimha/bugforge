@@ -52,8 +52,9 @@ async def get_kpis(
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None, description="Optional project filter"),
     team_id: Optional[int] = Query(default=None, description="Optional team filter"),
+    days: int = Query(default=30, ge=1, le=365, description="Time range in days"),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=days)
     return overview.kpis
 
 @router.get(
@@ -66,8 +67,9 @@ async def get_severity_distribution(
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
     team_id: Optional[int] = Query(default=None),
+    days: int = Query(default=30, ge=1, le=365, description="Time range in days"),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=days)
     return overview.severity_distribution
 
 @router.get(
@@ -80,8 +82,9 @@ async def get_category_distribution(
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
     team_id: Optional[int] = Query(default=None),
+    days: int = Query(default=30, ge=1, le=365, description="Time range in days"),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=days)
     return overview.category_distribution
 
 @router.get(
@@ -94,8 +97,9 @@ async def get_status_distribution(
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
     team_id: Optional[int] = Query(default=None),
+    days: int = Query(default=30, ge=1, le=365, description="Time range in days"),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=days)
     return overview.status_distribution
 
 @router.get(
@@ -108,8 +112,9 @@ async def get_developer_workload(
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
     team_id: Optional[int] = Query(default=None),
+    days: int = Query(default=30, ge=1, le=365, description="Time range in days"),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=days)
     return overview.developer_workload
 
 @router.get(
@@ -137,6 +142,7 @@ async def get_resolution_time_metrics(
     current_user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = Query(default=None),
     team_id: Optional[int] = Query(default=None),
+    days: int = Query(default=30, ge=1, le=365, description="Time range in days"),
 ):
-    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=30)
+    overview = service.get_overview(db, current_user, project_id=project_id, team_id=team_id, days=days)
     return overview.resolution_metrics

@@ -10,6 +10,12 @@ import SprintPlanningPage from './pages/Sprints/SprintPlanningPage'
 import ProfilePage from './pages/Profile/ProfilePage'
 import EmployeeManagementPage from './pages/Admin/EmployeeManagementPage'
 import TeamManagementPage from './pages/Admin/TeamManagementPage'
+import CompaniesPage from './pages/SuperAdmin/CompaniesPage'
+import CreateCompanyPage from './pages/SuperAdmin/CreateCompanyPage'
+import CompanyDetailsPage from './pages/SuperAdmin/CompanyDetailsPage'
+import SuperAdminAnalyticsPage from './pages/SuperAdmin/SuperAdminAnalyticsPage'
+import SuperAdminCustomizationRequestsPage from './pages/SuperAdmin/SuperAdminCustomizationRequestsPage'
+import CompanyProfilePage from './pages/Admin/CompanyProfilePage'
 import DashboardLayout from './layouts/DashboardLayout'
 
 export default function App() {
@@ -31,6 +37,17 @@ export default function App() {
           <Route path="/employees" element={<EmployeeManagementPage />} />
           <Route path="/teams" element={<TeamManagementPage />} />
           <Route path="/team-management" element={<Navigate to="/teams" replace />} />
+          
+          {/* Super Admin Platform Routes */}
+          <Route path="/super-admin/companies" element={<CompaniesPage />} />
+          <Route path="/super-admin/companies/create" element={<CreateCompanyPage />} />
+          <Route path="/super-admin/companies/:id" element={<CompanyDetailsPage />} />
+          <Route path="/super-admin/analytics" element={<SuperAdminAnalyticsPage />} />
+          <Route path="/super-admin/customization-requests" element={<SuperAdminCustomizationRequestsPage />} />
+
+          {/* Company Admin & Tenant Settings Routes */}
+          <Route path="/company/profile" element={<CompanyProfilePage />} />
+          <Route path="/company/customization-requests" element={<CompanyProfilePage initialTab="requests" />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

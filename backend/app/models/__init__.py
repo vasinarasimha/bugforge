@@ -1,3 +1,6 @@
+from app.models.company import Company, CompanySettings
+from app.models.customization_request import CustomizationRequest
+from app.models.company_audit_log import CompanyAuditLog
 from app.models.issue import Issue, IssueStatus, IssuePriority, IssueSeverity
 from app.models.project import Project, ProjectMember
 from app.models.user import User
@@ -12,7 +15,14 @@ from app.models.sprint import Sprint
 from app.models.troubleshooting import TroubleshootingSession, TroubleshootingAnswer
 from app.models.team import Team, TeamMember
 
+from app.models.notification import Notification
+
 __all__ = [
+    "Notification",
+    "Company",
+    "CompanySettings",
+    "CustomizationRequest",
+    "CompanyAuditLog",
     "User",
     "Project",
     "ProjectMember",

@@ -12,10 +12,7 @@ export default function ReporterDashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [dashboard, setDashboard] = useState(null)
-  const [modal, setModal] = useState(null)
-  const [projects, setProjects] = useState([])
   const [myIssues, setMyIssues] = useState([])
-  const [issueForm, setIssueForm] = useState({ title: '', description: '', project_id: '', priority: 'Medium', status: 'Open' })
 
   const refresh = () => {
     getDashboardStatistics()
@@ -29,18 +26,8 @@ export default function ReporterDashboard() {
 
   useEffect(() => { refresh() }, [])
 
-  const openIssue = async () => {
-    const { data } = await getProjects()
-    setProjects(data)
-    setModal('issue')
-  }
-
-  const saveIssue = async (event) => {
-    event.preventDefault()
-    await createIssue({ ...issueForm, project_id: Number(issueForm.project_id) })
-    setModal(null)
-    setIssueForm({ title: '', description: '', project_id: '', priority: 'Medium', status: 'Open' })
-    refresh()
+  const openIssue = () => {
+    navigate('/issues', { state: { openNewIssue: true } })
   }
 
   const stats = [
@@ -93,38 +80,6 @@ export default function ReporterDashboard() {
           <ActivityTimeline issues={myIssues.slice(0, 5)} />
         </div>
       </section>
-
-      {/* New issue modal */}
-      {modal === 'issue' && (
-        <div className="modal d-block">
-          <div className="modal-dialog">
-            <form className="modal-content" onSubmit={saveIssue} autoComplete="off">
-              <div className="modal-header">
-                <h5 className="modal-title">New Issue</h5>
-                <button type="button" className="btn-close" onClick={() => setModal(null)} />
-              </div>
-              <div className="modal-body">
-                <input required className="form-control" placeholder="Title" value={issueForm.title} autoComplete="off" onChange={(e) => setIssueForm({ ...issueForm, title: e.target.value })} />
-                <textarea required className="form-control" placeholder="Description" value={issueForm.description} autoComplete="off" onChange={(e) => setIssueForm({ ...issueForm, description: e.target.value })} />
-                <select required className="if-select" value={issueForm.project_id} onChange={(e) => setIssueForm({ ...issueForm, project_id: e.target.value })}>
-                  <option value="">Select project</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.project_name}</option>)}
-                </select>
-                <select className="if-select" value={issueForm.priority} onChange={(e) => setIssueForm({ ...issueForm, priority: e.target.value })}>
-                  {['Low', 'Medium', 'High', 'Critical'].map((v) => <option key={v}>{v}</option>)}
-                </select>
-                <select className="if-select" value={issueForm.status} onChange={(e) => setIssueForm({ ...issueForm, status: e.target.value })}>
-                  {['Open', 'In Progress', 'Resolved'].map((v) => <option key={v}>{v}</option>)}
-                </select>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-light" onClick={() => setModal(null)}>Cancel</button>
-                <button className="btn btn-primary">Save Issue</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

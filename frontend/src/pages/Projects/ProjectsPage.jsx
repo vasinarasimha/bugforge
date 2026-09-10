@@ -11,8 +11,8 @@ export default function ProjectsPage() {
   const { user } = useAuth()
   const location = useLocation()
 
-  const isAdmin = user?.role === 'Admin'
   const userRoles = user?.roles?.map(r => r.name) || []
+  const isAdmin = user?.role === 'Admin' || user?.role === 'Super Admin' || userRoles.includes('Admin') || userRoles.includes('Super Admin')
   const isProjectManager = userRoles.includes('Project Manager')
   const canEditProjects = isAdmin || isProjectManager
   const canDeleteProjects = isAdmin  // Only Admin can delete per requirements
