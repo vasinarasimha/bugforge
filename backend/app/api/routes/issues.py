@@ -98,9 +98,15 @@ async def list_statuses(
         ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
         if company_statuses:
             return company_statuses
-    return db.query(IssueStatus).filter(
+    global_statuses = db.query(IssueStatus).filter(
         IssueStatus.is_active == True,
         IssueStatus.company_id == None
+    ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+    if global_statuses:
+        return global_statuses
+    return db.query(IssueStatus).filter(
+        IssueStatus.is_active == True,
+        IssueStatus.company_id == 1
     ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
 
 @router.get("/priorities", response_model=list[IssuePriorityResponse])

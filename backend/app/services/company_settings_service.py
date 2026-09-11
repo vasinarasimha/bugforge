@@ -172,13 +172,19 @@ class CompanySettingsService:
 
     def list_statuses(self, db: Session, company_id: int) -> list[dict[str, Any]]:
         """List statuses configured for this company, with associated issue count."""
-        company_statuses = db.query(IssueStatus).filter(
+        statuses = db.query(IssueStatus).filter(
             IssueStatus.company_id == company_id
         ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
 
-        statuses = company_statuses if company_statuses else db.query(IssueStatus).filter(
-            IssueStatus.company_id == None
-        ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+        if not statuses:
+            statuses = db.query(IssueStatus).filter(
+                IssueStatus.company_id.is_(None)
+            ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+
+        if not statuses:
+            statuses = db.query(IssueStatus).filter(
+                IssueStatus.company_id == 1
+            ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
 
         results = []
         for s in statuses:

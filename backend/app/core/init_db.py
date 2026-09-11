@@ -66,10 +66,11 @@ def init_db() -> None:
             {"name": "Verified", "category": "resolved", "color": "#06b6d4", "order_index": 4, "is_initial": False, "is_final": False},
             {"name": "Closed", "category": "closed", "color": "#64748b", "order_index": 5, "is_initial": False, "is_final": True},
         ]
+        # A. Seed for BugForge company
         for s_def in default_statuses:
             existing = db.query(IssueStatus).filter(
                 IssueStatus.name == s_def["name"],
-                (IssueStatus.company_id == company_id) | (IssueStatus.company_id.is_(None))
+                IssueStatus.company_id == company_id,
             ).first()
             if not existing:
                 db.add(IssueStatus(
@@ -82,11 +83,28 @@ def init_db() -> None:
                     is_active=True,
                     company_id=company_id,
                 ))
-            else:
-                if existing.category != s_def["category"]:
-                    existing.category = s_def["category"]
-                if existing.company_id is None:
-                    existing.company_id = company_id
+            elif existing.category != s_def["category"]:
+                existing.category = s_def["category"]
+
+        # B. Seed global fallbacks (company_id is None)
+        for s_def in default_statuses:
+            existing_global = db.query(IssueStatus).filter(
+                IssueStatus.name == s_def["name"],
+                IssueStatus.company_id.is_(None),
+            ).first()
+            if not existing_global:
+                db.add(IssueStatus(
+                    name=s_def["name"],
+                    category=s_def["category"],
+                    color=s_def["color"],
+                    order_index=s_def["order_index"],
+                    is_initial=s_def["is_initial"],
+                    is_final=s_def["is_final"],
+                    is_active=True,
+                    company_id=None,
+                ))
+            elif existing_global.category != s_def["category"]:
+                existing_global.category = s_def["category"]
 
         # 2. Issue Priorities (global)
         priorities = ["Low", "Medium", "High", "Critical"]

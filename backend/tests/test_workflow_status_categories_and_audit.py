@@ -100,6 +100,19 @@ def setup_test_companies_and_users(db_session: Session):
         admin_b.roles = [admin_role]
         db_session.add(admin_b)
 
+    # Ensure default statuses exist for test companies
+    for comp in [comp_a, comp_b]:
+        existing_statuses = db_session.query(IssueStatus).filter(IssueStatus.company_id == comp.id).first()
+        if not existing_statuses:
+            default_statuses = [
+                IssueStatus(company_id=comp.id, name="Open", category="open", order_index=1, color="#3b82f6", is_initial=True),
+                IssueStatus(company_id=comp.id, name="In Progress", category="in_progress", order_index=2, color="#8b5cf6"),
+                IssueStatus(company_id=comp.id, name="Resolved", category="resolved", order_index=3, color="#10b981"),
+                IssueStatus(company_id=comp.id, name="Closed", category="closed", order_index=4, color="#6b7280", is_final=True),
+            ]
+            for status in default_statuses:
+                db_session.add(status)
+
     db_session.commit()
     db_session.refresh(comp_a)
     db_session.refresh(comp_b)
