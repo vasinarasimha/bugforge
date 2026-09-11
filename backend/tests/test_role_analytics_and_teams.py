@@ -63,6 +63,7 @@ def pm_user(db_session: Session):
                 name="BugForge Core Team",
                 description="Primary engineering team",
                 project_manager_id=u.id,
+                company_id=1,
                 is_active=True
             )
             db_session.add(team)
@@ -84,6 +85,7 @@ def tl_user(db_session: Session):
                 name="BugForge Core Team",
                 description="Primary engineering team",
                 team_leader_id=u.id,
+                company_id=1,
                 is_active=True
             )
             db_session.add(team)

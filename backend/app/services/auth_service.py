@@ -24,14 +24,16 @@ class AuthService:
             )
         return user
 
-    def create_employee(self, db: Session, employee_data: AdminUserCreate) -> User:
+    def create_employee(self, db: Session, employee_data: AdminUserCreate, current_admin: User | None = None) -> User:
         # Check duplicate email
-        existing = self.user_repository.get_by_email(db, str(employee_data.email), include_inactive=True)
+        existing = self.user_repository.get_by_email(db, str(employee_data.email).lower().strip(), include_inactive=True)
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A user with this email address already exists.",
             )
+
+        company_id = current_admin.company_id if (current_admin and current_admin.company_id) else 1
 
         user = User(
             full_name=employee_data.full_name.strip(),
@@ -48,6 +50,7 @@ class AuthService:
             state_code=employee_data.state_code.strip() if employee_data.state_code else None,
             country=employee_data.country.strip() if employee_data.country else None,
             country_code=employee_data.country_code.strip() if employee_data.country_code else None,
+            company_id=company_id,
             is_active=True,
         )
 
@@ -65,6 +68,12 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Employee with ID {user_id} not found.",
+            )
+
+        if current_admin.company_id and getattr(user, 'company_id', None) != current_admin.company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot modify employee belonging to another company.",
             )
 
         # Prevent admin from deactivating their own account
@@ -139,6 +148,11 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Employee with ID {user_id} not found.",
+            )
+        if current_admin.company_id and getattr(user, 'company_id', None) != current_admin.company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot deactivate employee belonging to another company.",
             )
         if user.id == current_admin.id:
             raise HTTPException(

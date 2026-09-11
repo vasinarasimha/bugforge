@@ -52,3 +52,7 @@ export const getSimilarIssues = (issueId, projectId = null) =>
 /** Legacy search by title+description (backward compatible) */
 export const searchIssues = (title, description, projectId = null, excludeIssueId = null) =>
     apiClient.post('/issues/search', { title, description, project_id: projectId, exclude_issue_id: excludeIssueId })
+
+export const submitFeatureRequest = (data) => apiClient.post('/issues/feature-requests', data)
+export const assignIssueTeam = (issueId, teamId) => apiClient.patch(`/issues/${issueId}/assign-team`, { team_id: teamId })
+export const qaVerifyIssue = (issueId, qaState, notes = null) => apiClient.patch(`/issues/${issueId}/qa-verify`, { qa_state: qaState, notes })

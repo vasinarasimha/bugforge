@@ -9,6 +9,31 @@ class IssueStatusResponse(BaseModel):
     id: int
     name: str
     is_active: bool
+    company_id: int | None = None
+    category: str | None = "open"
+    color: str | None = None
+    order_index: int = 0
+    is_initial: bool = False
+    is_final: bool = False
+
+
+class IssueStatusCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    category: str = Field(default="open", pattern=r"^(open|to_do|in_progress|resolved|closed)$")
+    color: str | None = Field(default="#6366f1", max_length=20)
+    order_index: int = Field(default=0, ge=0)
+    is_initial: bool = False
+    is_final: bool = False
+
+
+class IssueStatusUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    category: str | None = Field(default=None, pattern=r"^(open|to_do|in_progress|resolved|closed)$")
+    color: str | None = Field(default=None, max_length=20)
+    order_index: int | None = Field(default=None, ge=0)
+    is_initial: bool | None = None
+    is_final: bool | None = None
+    is_active: bool | None = None
 
 class IssuePriorityResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -55,6 +80,8 @@ class IssueCreate(BaseModel):
     resolution: str | None = None
     attachment_path: str | None = None
     sprint_id: int | None = None
+    requesting_company_id: int | None = None
+    team_id: int | None = None
 
     def model_post_init(self, __context):
         if self.issue_type not in VALID_ISSUE_TYPES:
@@ -62,6 +89,19 @@ class IssueCreate(BaseModel):
 
 class IssueUpdate(IssueCreate):
     ...
+
+class IssueAssignTeamRequest(BaseModel):
+    team_id: int = Field(gt=0)
+
+class IssueQAVerifyRequest(BaseModel):
+    qa_state: str = Field(pattern=r"^(Passed|Requires Rework)$")
+    notes: str | None = Field(default=None, max_length=2000)
+
+class FeatureRequestSubmit(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=10000)
+    priority_id: int | None = None
+    severity_id: int | None = None
 
 class IssueResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -97,6 +137,15 @@ class IssueResponse(BaseModel):
     reporter_name: str
     assigned_to: int | None
     assignee: str | None = None
+    company_id: int | None = None
+    requesting_company_id: int | None = None
+    requesting_company_name: str | None = None
+    team_id: int | None = None
+    team_name: str | None = None
+    qa_state: str | None = None
+    qa_verified_by_id: int | None = None
+    qa_verified_by_name: str | None = None
+    qa_verified_at: datetime | None = None
     ai_root_cause_session_id: int | None = None
     created_at: datetime
     updated_at: datetime

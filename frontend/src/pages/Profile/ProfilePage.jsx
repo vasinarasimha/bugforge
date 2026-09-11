@@ -374,7 +374,7 @@ export default function ProfilePage() {
                 <div className="mb-3">
                   <div className="d-flex justify-content-between align-items-center mb-1">
                     <label className="form-label mb-0 text-muted small fw-bold">EMAIL ADDRESS</label>
-                    <span className="badge bg-light text-muted border" style={{ fontSize: '0.72rem' }}>
+                    <span className="badge bg-secondary-subtle text-secondary border" style={{ fontSize: '0.72rem' }}>
                       <i className="bi bi-lock-fill me-1" />
                       Managed by Admin
                     </span>
@@ -393,7 +393,7 @@ export default function ProfilePage() {
                 <div className="mb-3">
                   <div className="d-flex justify-content-between align-items-center mb-1">
                     <label className="form-label mb-0 text-muted small fw-bold">ASSIGNED ROLE</label>
-                    <span className="badge bg-light text-muted border" style={{ fontSize: '0.72rem' }}>
+                    <span className="badge bg-secondary-subtle text-secondary border" style={{ fontSize: '0.72rem' }}>
                       <i className="bi bi-lock-fill me-1" />
                       Managed by Admin
                     </span>
@@ -412,7 +412,7 @@ export default function ProfilePage() {
                 <div className="mb-3">
                   <div className="d-flex justify-content-between align-items-center mb-1">
                     <label className="form-label mb-0 text-muted small fw-bold">ACCOUNT STATUS</label>
-                    <span className="badge bg-light text-muted border" style={{ fontSize: '0.72rem' }}>
+                    <span className="badge bg-secondary-subtle text-secondary border" style={{ fontSize: '0.72rem' }}>
                       <i className="bi bi-lock-fill me-1" />
                       Managed by Admin
                     </span>

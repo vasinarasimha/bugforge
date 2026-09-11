@@ -30,8 +30,24 @@ export default function IssueTable({ issues = [], onEdit, onDelete, canEdit = tr
           <tbody>
             {paginatedIssues.length ? paginatedIssues.map((issue) => (
               <tr key={issue.id}>
-                <td><strong className="issue-id">RI-{issue.id}</strong></td>
-                <td className="issue-title">{issue.title}</td>
+                <td>
+                  <div className="d-flex align-items-center gap-1.5">
+                    <strong className="issue-id">{issue.issue_key || `RI-${issue.id}`}</strong>
+                    {issue.issue_type === 'Feature' && (
+                      <span className="badge px-1.5 py-0.5 rounded-pill" style={{ fontSize: '0.68rem', backgroundColor: 'rgba(139,92,246,0.12)', color: '#7c3aed' }}>
+                        ✨ Feature
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="issue-title">
+                  <div>{issue.title}</div>
+                  {issue.requesting_company_name && (
+                    <span className="text-muted" style={{ fontSize: '0.72rem' }}>
+                      <i className="bi bi-building me-1" />{issue.requesting_company_name}
+                    </span>
+                  )}
+                </td>
                 <td>{issue.project_name}</td>
                 <td><span className="badge" style={{ backgroundColor: getPriorityColor(issue.priority_name || ''), color: 'white' }}>{issue.priority_name}</span></td>
                 <td><span className="badge" style={{ backgroundColor: getStatusColor(issue.status_name || ''), color: 'white' }}>{issue.status_name}</span></td>

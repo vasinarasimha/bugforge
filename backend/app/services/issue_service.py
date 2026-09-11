@@ -23,22 +23,48 @@ class IssueService:
     def __init__(self):
         self.repository = IssueRepository()
 
-    def list(self, db: Session, reporter_id: int | None = None, project_ids: list[int] | None = None):
-        return self.repository.list(db, reporter_id=reporter_id, project_ids=project_ids)
+    def list(self, db: Session, reporter_id: int | None = None, project_ids: list[int] | None = None, company_id: int | None = None):
+        return self.repository.list(db, reporter_id=reporter_id, project_ids=project_ids, company_id=company_id)
 
-    def get(self, db: Session, issue_id: int):
-        issue = self.repository.get(db, issue_id)
+    def get(self, db: Session, issue_id: int, company_id: int | None = None):
+        issue = self.repository.get(db, issue_id, company_id=company_id)
         if not issue:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Issue not found")
         return issue
 
-    def _validate_references(self, db: Session, data: IssueCreate | IssueUpdate):
+    def delete(self, db: Session, issue_id: int, user: User):
+        issue = self.get(db, issue_id, company_id=user.company_id)
+        self.repository.delete(db, issue)
+
+    def _validate_references(self, db: Session, data: IssueCreate | IssueUpdate, company_id: int | None = None):
         if hasattr(data, 'project_id') and data.project_id is not None:
-            if not ProjectRepository().get(db, data.project_id):
+            project = ProjectRepository().get(db, data.project_id)
+            if not project:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected project does not exist")
+            if company_id is not None and getattr(project, 'company_id', None) != company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot reference project belonging to another company")
         if hasattr(data, 'assigned_to') and data.assigned_to:
-            if not UserRepository().get_by_id(db, data.assigned_to):
+            assignee = UserRepository().get_by_id(db, data.assigned_to)
+            if not assignee:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected assignee does not exist")
+            if company_id is not None and getattr(assignee, 'company_id', None) != company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot assign issue to user from another company")
+        if hasattr(data, 'sprint_id') and data.sprint_id:
+            from app.models.sprint import Sprint
+            sprint = db.query(Sprint).filter(Sprint.id == data.sprint_id).first()
+            if not sprint:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected sprint does not exist")
+            if company_id is not None and getattr(sprint, 'project', None) and getattr(sprint.project, 'company_id', None) != company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot assign issue to sprint from another company")
+        if hasattr(data, 'status_id') and data.status_id is not None:
+            from app.models.issue import IssueStatus
+            st = db.query(IssueStatus).filter(IssueStatus.id == data.status_id).first()
+            if not st:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected status does not exist")
+            if company_id is not None and st.company_id is not None and st.company_id != company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot use status configured for another company")
+            if not st.is_active:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Status '{st.name}' is deactivated and cannot be selected for issues")
 
     def _resolve_names_for_embedding(self, db: Session, category_id: int | None, module_id: int | None) -> tuple[str | None, str | None]:
         """Resolve category and module IDs to names for embedding text."""
@@ -96,11 +122,12 @@ class IssueService:
         return f"{prefix}-{candidate_num}"
 
     def create(self, db: Session, data: IssueCreate, user: User):
-        self._validate_references(db, data)
+        self._validate_references(db, data, company_id=user.company_id)
         project = ProjectRepository().get(db, data.project_id)
         issue_key = self._generate_next_issue_key(db, project.key)
 
         issue_data = data.model_dump()
+        issue_data['company_id'] = user.company_id or getattr(project, 'company_id', 1) or 1
 
         # Resolve category/module names for richer embedding
         category_name, module_name = self._resolve_names_for_embedding(
@@ -121,8 +148,8 @@ class IssueService:
         return self.repository.create(db, Issue(**issue_data, reporter_id=user.id, issue_key=issue_key))
 
     def update(self, db: Session, issue_id: int, data: IssueUpdate, user: User):
-        self._validate_references(db, data)
-        issue = self.get(db, issue_id)
+        issue = self.get(db, issue_id, company_id=user.company_id)
+        self._validate_references(db, data, company_id=user.company_id)
 
         # Flag to determine if we need to regenerate embedding
         regenerate_embedding = False
@@ -225,10 +252,10 @@ class IssueService:
         db.refresh(issue)
         return self.repository.get(db, issue.id)
 
-    def find_similar_issues(self, db: Session, issue_id: int, project_id: int | None = None):
+    def find_similar_issues(self, db: Session, issue_id: int, project_id: int | None = None, company_id: int | None = None):
         """Find issues similar to an existing issue using pgvector similarity."""
         settings = get_settings()
-        issue = self.get(db, issue_id)
+        issue = self.get(db, issue_id, company_id=company_id)
 
         if issue.embedding_vector is None:
             return []
@@ -241,13 +268,14 @@ class IssueService:
                 project_id=project_id or issue.project_id,
                 similarity_threshold=settings.similarity_threshold,
                 limit=settings.similar_defects_limit,
+                company_id=company_id,
             )
             return self._format_similar_results(results, settings)
         except Exception as e:
             logger.error(f"Similar issue search failed: {e}")
             return []
 
-    def find_similar_for_embedding(self, db: Session, embedding: list[float], exclude_issue_id: int | None = None, project_id: int | None = None):
+    def find_similar_for_embedding(self, db: Session, embedding: list[float], exclude_issue_id: int | None = None, project_id: int | None = None, company_id: int | None = None):
         """Find issues similar to a given embedding vector (used during creation)."""
         settings = get_settings()
         try:
@@ -258,13 +286,14 @@ class IssueService:
                 project_id=project_id,
                 similarity_threshold=settings.similarity_threshold,
                 limit=settings.similar_defects_limit,
+                company_id=company_id,
             )
             return self._format_similar_results(results, settings)
         except Exception as e:
             logger.error(f"Similar issue search failed: {e}")
             return []
 
-    def semantic_search(self, db: Session, query: str, exclude_issue_id: int | None = None, project_id: int | None = None, limit: int | None = None):
+    def semantic_search(self, db: Session, query: str, exclude_issue_id: int | None = None, project_id: int | None = None, limit: int | None = None, company_id: int | None = None):
         """Search issues using natural language query."""
         settings = get_settings()
         try:
@@ -279,6 +308,7 @@ class IssueService:
                 project_id=project_id,
                 similarity_threshold=settings.similarity_threshold,
                 limit=limit or 20,
+                company_id=company_id,
             )
             return self._format_similar_results(results, settings)
         except Exception as e:
@@ -482,3 +512,418 @@ class IssueService:
             )
             if embedding is not None:
                 new_issue.embedding_vector = embedding
+
+    def _get_or_create_bugforge_company(self, db: Session):
+        from app.models.company import Company
+        bf = db.query(Company).filter(Company.name.ilike("BugForge")).first()
+        if not bf:
+            bf = Company(name="BugForge", domain="bugforge.internal", is_active=True)
+            db.add(bf)
+            db.commit()
+            db.refresh(bf)
+        return bf
+
+    def _get_or_create_bugforge_project(self, db: Session):
+        from app.models.project import Project
+        bf_comp = self._get_or_create_bugforge_company(db)
+        proj = db.query(Project).filter(Project.company_id == bf_comp.id, Project.is_active == True).first()
+        if not proj:
+            proj = Project(
+                name="BugForge Platform Features",
+                key="BFP",
+                description="BugForge platform feature requests and customizations",
+                company_id=bf_comp.id,
+                is_active=True,
+            )
+            db.add(proj)
+            db.commit()
+            db.refresh(proj)
+        return proj
+
+    def submit_feature_request(
+        self,
+        db: Session,
+        title: str,
+        description: str,
+        user: User,
+        priority_id: int | None = None,
+        severity_id: int | None = None,
+    ) -> Issue:
+        """
+        Customer Company Admin submits a Feature Request to BugForge.
+        Represented as an Issue with issue_type = 'Feature', company_id = 1 (BugForge),
+        requesting_company_id = user.company_id, and reporter_id = user.id.
+        """
+        from app.models.issue import IssuePriority, IssueSeverity, IssueStatus
+        from app.models.role import Role
+        from app.services.notification_service import notification_service
+
+        bf_comp = self._get_or_create_bugforge_company(db)
+        bf_project = self._get_or_create_bugforge_project(db)
+        issue_key = self._generate_next_issue_key(db, bf_project.key)
+
+        # Initial status
+        init_status = db.query(IssueStatus).filter(
+            IssueStatus.company_id == bf_comp.id, IssueStatus.is_active == True, IssueStatus.is_initial == True
+        ).first() or db.query(IssueStatus).filter(
+            IssueStatus.company_id == bf_comp.id, IssueStatus.is_active == True, IssueStatus.name.in_(["Requested", "Open"])
+        ).first() or db.query(IssueStatus).filter(IssueStatus.is_active == True).first()
+
+        p_id = priority_id
+        if not p_id:
+            med_p = db.query(IssuePriority).filter(IssuePriority.is_active == True, IssuePriority.name == "Medium").first() or db.query(IssuePriority).first()
+            p_id = med_p.id if med_p else 1
+
+        s_id = severity_id
+        if not s_id:
+            med_s = db.query(IssueSeverity).filter(IssueSeverity.is_active == True, IssueSeverity.name == "Medium").first() or db.query(IssueSeverity).first()
+            s_id = med_s.id if med_s else 1
+
+        # Generate embedding
+        embedding = self._generate_embedding_safe(
+            title=title.strip(),
+            description=description.strip(),
+            issue_type="Feature",
+        )
+
+        feature_issue = Issue(
+            issue_key=issue_key,
+            title=title.strip(),
+            description=description.strip(),
+            issue_type="Feature",
+            project_id=bf_project.id,
+            reporter_id=user.id,
+            company_id=bf_comp.id,  # Belongs to BugForge internal execution
+            requesting_company_id=user.company_id,
+            status_id=init_status.id,
+            priority_id=p_id,
+            severity_id=s_id,
+            embedding_vector=embedding,
+        )
+        db.add(feature_issue)
+        db.commit()
+        db.refresh(feature_issue)
+
+        # 1. Notify Super Admins
+        super_admins = db.query(User).join(User.roles).filter(Role.name == "Super Admin", User.is_active == True).all()
+        company_label = user.company_name or f"Company #{user.company_id}"
+        for sa in super_admins:
+            notification_service.create_notification(
+                db,
+                recipient_id=sa.id,
+                actor_id=user.id,
+                company_id=bf_comp.id,
+                notification_type="FEATURE_REQUEST_SUBMITTED",
+                title="New Feature Request",
+                message=f"{user.full_name} ({company_label}) submitted Feature: {feature_issue.title}",
+                entity_type="ISSUE",
+                entity_id=feature_issue.id,
+                link_url=f"/issues",
+            )
+
+        # 2. Notify Requesting Company Admin
+        notification_service.create_notification(
+            db,
+            recipient_id=user.id,
+            actor_id=user.id,
+            company_id=user.company_id or bf_comp.id,
+            notification_type="FEATURE_REQUEST_SUBMITTED",
+            title="Feature Request Submitted",
+            message=f"Feature request '{feature_issue.title}' ({feature_issue.issue_key}) has been submitted to BugForge.",
+            entity_type="ISSUE",
+            entity_id=feature_issue.id,
+            link_url=f"/issues",
+        )
+
+        return self.repository.get(db, feature_issue.id)
+
+    def assign_team(self, db: Session, issue_id: int, team_id: int, user: User) -> Issue:
+        """
+        Super Admin assigns a feature issue to an internal BugForge team.
+        """
+        from app.models.team import Team
+        from app.models.issue import IssueStatus
+        from app.services.notification_service import notification_service
+
+        user_roles = [r.name for r in user.roles]
+        if "Super Admin" not in user_roles:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Only Super Admin can assign feature requests to internal teams")
+
+        issue = self.repository.get(db, issue_id)
+        if not issue:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Issue not found")
+
+        bf_comp = self._get_or_create_bugforge_company(db)
+        team = db.query(Team).filter(Team.id == team_id, Team.is_active == True).first()
+        if not team:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Selected internal team does not exist")
+        if team.company_id != bf_comp.id:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Assigned team must belong to BugForge organization")
+
+        issue.team_id = team_id
+
+        # Transition status to Assigned if currently open/initial
+        assigned_status = db.query(IssueStatus).filter(
+            IssueStatus.company_id == bf_comp.id,
+            IssueStatus.is_active == True,
+            IssueStatus.name.in_(["Assigned", "Under Review", "In Progress"])
+        ).first()
+        if assigned_status and issue.status and issue.status.category == "open":
+            issue.status_id = assigned_status.id
+
+        db.commit()
+        db.refresh(issue)
+
+        # Notify PM and TL of the assigned team
+        recipients = set()
+        if team.team_leader_id:
+            recipients.add(team.team_leader_id)
+        if team.project_manager_id:
+            recipients.add(team.project_manager_id)
+
+        for rid in recipients:
+            notification_service.create_notification(
+                db,
+                recipient_id=rid,
+                actor_id=user.id,
+                company_id=bf_comp.id,
+                notification_type="FEATURE_ASSIGNED_TO_TEAM",
+                title="Feature Assigned to Team",
+                message=f"{user.full_name} assigned Feature {issue.issue_key} to your team ({team.name})",
+                entity_type="ISSUE",
+                entity_id=issue.id,
+                link_url=f"/issues",
+            )
+
+        return self.repository.get(db, issue.id)
+
+    def assign_developer(self, db: Session, issue_id: int, developer_id: int | None, user: User) -> Issue:
+        """
+        PM/TL of the assigned team (or Super Admin/Admin) assigns work to a Developer.
+        """
+        from app.models.issue import IssueStatus
+        from app.services.notification_service import notification_service
+
+        issue = self.repository.get(db, issue_id)
+        if not issue:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Issue not found")
+
+        user_roles = [r.name for r in user.roles]
+        is_super_admin = "Super Admin" in user_roles
+        is_admin = "Admin" in user_roles
+        is_pm = any(r in ["Project Manager", "PM"] for r in user_roles)
+        is_tl = any(r in ["Team Leader", "TL"] for r in user_roles)
+
+        can_assign = is_super_admin or (is_admin and user.company_id == issue.company_id)
+        if issue.team:
+            if issue.team.team_leader_id == user.id or issue.team.project_manager_id == user.id:
+                can_assign = True
+        if (is_pm or is_tl) and issue.company_id == user.company_id:
+            can_assign = True
+
+        if not can_assign:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Only authorized PM, TL, or Admin can assign developers")
+
+        if developer_id is not None and developer_id > 0:
+            dev = UserRepository().get_by_id(db, developer_id)
+            if not dev:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected developer does not exist")
+            if dev.company_id != issue.company_id and not is_super_admin:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Developer must belong to the same organization")
+
+            issue.assigned_to = developer_id
+
+            # Move to In Progress / In Development if in open status
+            in_prog_status = db.query(IssueStatus).filter(
+                IssueStatus.company_id == issue.company_id,
+                IssueStatus.is_active == True,
+                IssueStatus.category == "in_progress"
+            ).first()
+            if in_prog_status and issue.status and issue.status.category == "open":
+                issue.status_id = in_prog_status.id
+
+            db.commit()
+            db.refresh(issue)
+
+            notification_service.create_notification(
+                db,
+                recipient_id=developer_id,
+                actor_id=user.id,
+                company_id=issue.company_id,
+                notification_type="FEATURE_ASSIGNED_TO_DEV",
+                title="Work Assigned to You",
+                message=f"Feature {issue.issue_key} ({issue.title}) was assigned to you",
+                entity_type="ISSUE",
+                entity_id=issue.id,
+                link_url=f"/issues",
+            )
+        else:
+            issue.assigned_to = None
+            db.commit()
+            db.refresh(issue)
+
+        return self.repository.get(db, issue.id)
+
+    def qa_verify(self, db: Session, issue_id: int, qa_state: str, notes: str | None, user: User) -> Issue:
+        """
+        QA verifies the feature implementation: Passed or Requires Rework.
+        """
+        from datetime import datetime, timezone
+        from app.models.comment import IssueComment
+        from app.models.issue import IssueStatus
+        from app.services.notification_service import notification_service
+
+        user_roles = [r.name for r in user.roles]
+        can_qa = any(r in ["QA", "Admin", "Super Admin", "Project Manager", "Team Leader"] for r in user_roles)
+        if not can_qa:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Only QA or authorized roles can perform QA verification")
+
+        issue = self.repository.get(db, issue_id)
+        if not issue:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Issue not found")
+
+        issue.qa_state = qa_state
+        issue.qa_verified_by_id = user.id
+        issue.qa_verified_at = datetime.now(timezone.utc)
+
+        comment_text = f"[QA Verification: {qa_state}]"
+        if notes and notes.strip():
+            comment_text += f" {notes.strip()}"
+        comment = IssueComment(issue_id=issue.id, user_id=user.id, content=comment_text)
+        db.add(comment)
+
+        if qa_state == "Passed":
+            res_status = db.query(IssueStatus).filter(
+                IssueStatus.company_id == issue.company_id,
+                IssueStatus.is_active == True,
+                IssueStatus.category == "resolved"
+            ).first()
+            if not res_status:
+                res_status = db.query(IssueStatus).filter(
+                    IssueStatus.company_id == issue.company_id,
+                    IssueStatus.is_active == True,
+                    (IssueStatus.name.ilike("%resolved%")) | (IssueStatus.name.ilike("%verified%"))
+                ).first()
+            if not res_status:
+                res_status = db.query(IssueStatus).filter(
+                    IssueStatus.is_active == True,
+                    IssueStatus.category == "resolved"
+                ).first()
+            if not res_status:
+                res_status = db.query(IssueStatus).filter(
+                    IssueStatus.is_active == True,
+                    (IssueStatus.name.ilike("%resolved%")) | (IssueStatus.name.ilike("%verified%"))
+                ).first()
+            if not res_status:
+                res_status = IssueStatus(
+                    name="Resolved",
+                    category="resolved",
+                    color="#10b981",
+                    company_id=issue.company_id,
+                    is_active=True
+                )
+                db.add(res_status)
+                db.flush()
+            if res_status:
+                issue.status_id = res_status.id
+        elif qa_state == "Requires Rework":
+            in_prog_status = db.query(IssueStatus).filter(
+                IssueStatus.company_id == issue.company_id,
+                IssueStatus.is_active == True,
+                IssueStatus.category == "in_progress"
+            ).first()
+            if not in_prog_status:
+                in_prog_status = db.query(IssueStatus).filter(
+                    IssueStatus.company_id == issue.company_id,
+                    IssueStatus.is_active == True,
+                    IssueStatus.name.ilike("%progress%")
+                ).first()
+            if not in_prog_status:
+                in_prog_status = db.query(IssueStatus).filter(
+                    IssueStatus.is_active == True,
+                    IssueStatus.category == "in_progress"
+                ).first()
+            if not in_prog_status:
+                in_prog_status = db.query(IssueStatus).filter(
+                    IssueStatus.is_active == True,
+                    IssueStatus.name.ilike("%progress%")
+                ).first()
+            if not in_prog_status:
+                in_prog_status = IssueStatus(
+                    name="In Progress",
+                    category="in_progress",
+                    color="#8b5cf6",
+                    company_id=issue.company_id,
+                    is_active=True
+                )
+                db.add(in_prog_status)
+                db.flush()
+            if in_prog_status:
+                issue.status_id = in_prog_status.id
+
+            if issue.assigned_to:
+                notification_service.create_notification(
+                    db,
+                    recipient_id=issue.assigned_to,
+                    actor_id=user.id,
+                    company_id=issue.company_id,
+                    notification_type="FEATURE_QA_REWORK",
+                    title="QA Verification: Rework Required",
+                    message=f"QA requested rework on Feature {issue.issue_key}: {notes or 'Please review verification comments.'}",
+                    entity_type="ISSUE",
+                    entity_id=issue.id,
+                    link_url=f"/issues",
+                )
+
+        db.commit()
+        db.refresh(issue)
+        return self.repository.get(db, issue.id)
+
+    def notify_status_change(self, db: Session, issue: Issue, old_status_id: int, new_status_id: int, actor: User):
+        """
+        Send contextual notifications when an issue status changes significantly.
+        """
+        from app.models.issue import IssueStatus
+        from app.models.role import Role
+        from app.services.notification_service import notification_service
+
+        new_status = db.query(IssueStatus).filter(IssueStatus.id == new_status_id).first()
+        if not new_status:
+            return
+
+        # 1. Closed: notify requesting customer company admin
+        if new_status.is_final or new_status.category == "closed" or new_status.name.lower() == "closed":
+            if getattr(issue, "requesting_company_id", None) and issue.reporter_id:
+                notification_service.create_notification(
+                    db,
+                    recipient_id=issue.reporter_id,
+                    actor_id=actor.id,
+                    company_id=issue.requesting_company_id,
+                    notification_type="FEATURE_CLOSED",
+                    title="Feature Implemented",
+                    message=f"Feature {issue.issue_key} was successfully implemented",
+                    entity_type="ISSUE",
+                    entity_id=issue.id,
+                    link_url=f"/issues",
+                )
+
+        # 2. Resolved / Ready for QA: notify QA
+        elif new_status.category == "resolved" or "qa" in new_status.name.lower():
+            qa_users = db.query(User).join(User.roles).filter(
+                Role.name == "QA",
+                User.is_active == True,
+                User.company_id == issue.company_id
+            ).all()
+            for qu in qa_users:
+                notification_service.create_notification(
+                    db,
+                    recipient_id=qu.id,
+                    actor_id=actor.id,
+                    company_id=issue.company_id,
+                    notification_type="FEATURE_READY_FOR_QA",
+                    title="Ready for QA Verification",
+                    message=f"Feature {issue.issue_key} is ready for QA verification",
+                    entity_type="ISSUE",
+                    entity_id=issue.id,
+                    link_url=f"/issues",
+                )

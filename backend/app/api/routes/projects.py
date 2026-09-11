@@ -49,26 +49,27 @@ async def list_projects(
 ):
     # Apply record rules based on user role
     user_roles = [r.name for r in current_user.roles]
+    cid = current_user.company_id
 
     if "Admin" in user_roles:
-        # Admin sees all projects
-        projects = service.list(db, search=search, limit=limit, offset=offset)
+        # Admin sees all projects within company
+        projects = service.list(db, search=search, limit=limit, offset=offset, company_id=cid)
     elif "Project Manager" in user_roles:
-        # Project Manager sees only their assigned projects
-        projects = service.list_by_manager(db, current_user.id, search=search, limit=limit, offset=offset)
+        # Project Manager sees only their assigned projects within company
+        projects = service.list_by_manager(db, current_user.id, search=search, limit=limit, offset=offset, company_id=cid)
     elif "Team Leader" in user_roles:
-        # Team Leader sees only their assigned projects
-        projects = service.list_by_leader(db, current_user.id, search=search, limit=limit, offset=offset)
+        # Team Leader sees only their assigned projects within company
+        projects = service.list_by_leader(db, current_user.id, search=search, limit=limit, offset=offset, company_id=cid)
     else:
-        # Others (Developer, QA, Reporter) see all active projects for context
-        projects = service.list(db, search=search, limit=limit, offset=offset)
+        # Others (Developer, QA, Reporter) see all active projects within company for context
+        projects = service.list(db, search=search, limit=limit, offset=offset, company_id=cid)
 
     return [serialize(p) for p in projects]
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: int, db: Annotated[Session, Depends(get_db)], current_user: Annotated[User, Depends(get_current_user)]):
     # Apply record rules for individual project access
-    project = service.get(db, project_id)
+    project = service.get(db, project_id, company_id=current_user.company_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -109,7 +110,7 @@ async def update_project(project_id: int, data: ProjectUpdate, db: Annotated[Ses
         raise HTTPException(status_code=403, detail="Not authorized to update projects")
 
     # Get the existing project to track changes
-    existing_project = service.get(db, project_id)
+    existing_project = service.get(db, project_id, company_id=user.company_id)
     if not existing_project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -128,7 +129,7 @@ async def delete_project(project_id: int, db: Annotated[Session, Depends(get_db)
     if "Admin" not in user_roles:
         raise HTTPException(status_code=403, detail="Not authorized to delete projects")
 
-    service.delete(db, project_id)
+    service.delete(db, project_id, user=user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.get("/{project_id}/history", response_model=list[dict])

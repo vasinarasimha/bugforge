@@ -8,6 +8,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.user import User
+    from app.models.company import Company
 
 
 class Team(Base):
@@ -27,6 +28,9 @@ class Team(Base):
         nullable=True,
         index=True
     )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), default=1, nullable=False, index=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -35,6 +39,7 @@ class Team(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    company: Mapped["Company"] = relationship(back_populates="teams")
     team_leader: Mapped["User | None"] = relationship(foreign_keys=[team_leader_id])
     project_manager: Mapped["User | None"] = relationship(foreign_keys=[project_manager_id])
     members: Mapped[list["TeamMember"]] = relationship(

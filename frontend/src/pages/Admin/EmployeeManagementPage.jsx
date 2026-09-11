@@ -12,6 +12,7 @@ import CountryStateSelect from '../../components/CountryStateSelect/CountryState
 import Toast from '../../components/Toast/Toast'
 
 const ROLE_BADGE_CLASSES = {
+  'Super Admin': 'badge-role-super-admin',
   Admin: 'badge-role-admin',
   Developer: 'badge-role-developer',
   QA: 'badge-role-qa',
@@ -77,6 +78,7 @@ export default function EmployeeManagementPage() {
       setRolesList(data)
     } catch {
       setRolesList([
+        { name: 'Super Admin' },
         { name: 'Admin' },
         { name: 'Developer' },
         { name: 'QA' },

@@ -134,6 +134,7 @@ class TeamService:
             team_leader_id=data.team_leader_id,
             project_manager_id=data.project_manager_id,
             is_active=data.is_active,
+            company_id=getattr(data, "company_id", None) or 1,
         )
 
         created_team = self.team_repository.create(db, team, data.member_ids)

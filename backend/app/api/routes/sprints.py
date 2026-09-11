@@ -4,9 +4,9 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_current_user, require_role
 from app.core.database import get_db
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.sprint import SprintStatus
 from app.schemas.sprint import (
     SprintCreate, SprintUpdate, SprintResponse, SprintStatusResponse, SprintIssueAssign
@@ -58,26 +58,26 @@ async def list_sprint_statuses(db: Annotated[Session, Depends(get_db)]):
 @router.get("", response_model=list[SprintResponse])
 async def list_sprints(
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = None,
 ):
-    return [serialize(s) for s in service.list(db, project_id)]
+    return [serialize(s) for s in service.list(db, project_id, company_id=user.company_id)]
 
 
 @router.get("/{sprint_id}", response_model=SprintResponse)
 async def get_sprint(
     sprint_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_user)],
 ):
-    return serialize(service.get(db, sprint_id))
+    return serialize(service.get(db, sprint_id, company_id=user.company_id))
 
 
 @router.post("", response_model=SprintResponse, status_code=status.HTTP_201_CREATED)
 async def create_sprint(
     data: SprintCreate,
     db: Annotated[Session, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_role([UserRole.ADMIN, UserRole.PROJECT_MANAGER, UserRole.TEAM_LEADER]))],
 ):
     return serialize(service.create(db, data, user))
 
@@ -87,18 +87,18 @@ async def update_sprint(
     sprint_id: int,
     data: SprintUpdate,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_role([UserRole.ADMIN, UserRole.PROJECT_MANAGER, UserRole.TEAM_LEADER]))],
 ):
-    return serialize(service.update(db, sprint_id, data))
+    return serialize(service.update(db, sprint_id, data, user=user))
 
 
 @router.delete("/{sprint_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_sprint(
     sprint_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_role([UserRole.ADMIN, UserRole.PROJECT_MANAGER, UserRole.TEAM_LEADER]))],
 ):
-    service.delete(db, sprint_id)
+    service.delete(db, sprint_id, user=user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

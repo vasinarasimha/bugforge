@@ -28,11 +28,14 @@ user_repository = UserRepository()
 @router.get("/stats")
 async def admin_stats(
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
+    current_admin: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
 ):
-    users = list(db.scalars(select(User).where(User.is_system_user == False)).all())
-    issues = IssueService().list(db)
-    projects = ProjectService().list(db)
+    stmt = select(User).where(User.is_system_user == False)
+    if current_admin.company_id:
+        stmt = stmt.where(User.company_id == current_admin.company_id)
+    users = list(db.scalars(stmt).all())
+    issues = IssueService().list(db, company_id=current_admin.company_id)
+    projects = ProjectService().list(db, company_id=current_admin.company_id)
 
     role_distribution = {role.value: 0 for role in UserRole}
     for u in users:
@@ -44,10 +47,10 @@ async def admin_stats(
         "role_distribution": role_distribution,
         "total_projects": len(projects),
         "total_issues": len(issues),
-        "open_issues": sum(1 for i in issues if i.status == "Open"),
-        "in_progress_issues": sum(1 for i in issues if i.status == "In Progress"),
-        "resolved_issues": sum(1 for i in issues if i.status == "Resolved"),
-        "critical_issues": sum(1 for i in issues if i.priority == "Critical"),
+        "open_issues": sum(1 for i in issues if i.status and i.status.name == "Open"),
+        "in_progress_issues": sum(1 for i in issues if i.status and i.status.name == "In Progress"),
+        "resolved_issues": sum(1 for i in issues if i.status and i.status.name == "Resolved"),
+        "critical_issues": sum(1 for i in issues if i.priority and i.priority.name == "Critical"),
         "latest_projects": [project_serialize(p) for p in projects[:6]],
         "recent_issues": [issue_serialize(i) for i in issues[:8]],
     }
@@ -66,7 +69,7 @@ def get_system_roles(
 @router.get("/users")
 def list_employees(
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
+    current_admin: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
     search: Optional[str] = None,
     role: Optional[str] = None,
     is_active: Optional[bool] = None,
@@ -84,6 +87,7 @@ def list_employees(
         is_active=is_active,
         limit=limit,
         offset=offset,
+        company_id=current_admin.company_id,
     )
     return {
         "data": [UserResponse.model_validate(u) for u in users],
@@ -97,7 +101,7 @@ def list_employees(
 def get_employee(
     user_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
+    current_admin: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
 ):
     """Get complete employee profile by ID (including inactive accounts)."""
     user = user_repository.get_by_id(db, user_id, include_inactive=True)
@@ -106,6 +110,11 @@ def get_employee(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Employee with ID {user_id} not found.",
         )
+    if current_admin.company_id and getattr(user, 'company_id', None) != current_admin.company_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot access employee belonging to another company.",
+        )
     return user
 
 
@@ -113,10 +122,10 @@ def get_employee(
 def create_employee(
     employee_data: AdminUserCreate,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
+    current_admin: Annotated[User, Depends(require_role([UserRole.ADMIN]))],
 ):
     """Create a new employee account with role, contact, and address information."""
-    return auth_service.create_employee(db, employee_data)
+    return auth_service.create_employee(db, employee_data, current_admin=current_admin)
 
 
 @router.patch("/users/{user_id}", response_model=UserResponse)

@@ -86,7 +86,8 @@ class UserRepository:
         is_active: Optional[bool] = None,
         include_system: bool = False,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
+        company_id: Optional[int] = None,
     ) -> Tuple[list[User], int]:
         stmt = select(User)
         count_stmt = select(func.count(User.id))
@@ -94,6 +95,10 @@ class UserRepository:
         if not include_system:
             stmt = stmt.where(User.is_system_user == False)
             count_stmt = count_stmt.where(User.is_system_user == False)
+
+        if company_id is not None:
+            stmt = stmt.where(User.company_id == company_id)
+            count_stmt = count_stmt.where(User.company_id == company_id)
 
         if is_active is not None:
             stmt = stmt.where(User.is_active == is_active)

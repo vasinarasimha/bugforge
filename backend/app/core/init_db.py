@@ -1,10 +1,12 @@
 """Database schema initialization and seed data script.
 Used to create all tables and initial seed data directly via SQLAlchemy metadata.
 """
+import os
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import Base, engine, SessionLocal
+from app.core.security import hash_password
 # Import all models to ensure they are registered on Base.metadata
 import app.models  # noqa: F401
 from app.models.issue import (
@@ -17,6 +19,8 @@ from app.models.issue import (
 from app.models.sprint import SprintStatus
 from app.models.role import Role, Permission, role_permissions
 from app.models.team import Team
+from app.models.company import Company, CompanySettings
+from app.models.user import User
 
 
 def init_db() -> None:
@@ -39,35 +43,96 @@ def init_db() -> None:
     # Seed initial lookup tables, roles, and permissions
     db: Session = SessionLocal()
     try:
-        # 1. Issue Statuses
-        statuses = ["Open", "In Progress", "Resolved", "Closed"]
-        for name in statuses:
-            if not db.query(IssueStatus).filter(IssueStatus.name == name).first():
-                db.add(IssueStatus(name=name, is_active=True))
+        # 0. Default Company
+        default_company = db.query(Company).filter(Company.name == "BugForge").first()
+        if not default_company:
+            default_company = Company(
+                name="BugForge",
+                legal_name="BugForge Inc.",
+                timezone="UTC",
+                is_active=True
+            )
+            db.add(default_company)
+            db.flush()  # Get the ID
+            # Create default settings
+            db.add(CompanySettings(company_id=default_company.id, settings={}))
+        company_id = default_company.id
 
-        # 2. Issue Priorities
+        # 1. Issue Statuses (company default & global fallback)
+        default_statuses = [
+            {"name": "Open", "category": "open", "color": "#3b82f6", "order_index": 1, "is_initial": True, "is_final": False},
+            {"name": "In Progress", "category": "in_progress", "color": "#8b5cf6", "order_index": 2, "is_initial": False, "is_final": False},
+            {"name": "Resolved", "category": "resolved", "color": "#10b981", "order_index": 3, "is_initial": False, "is_final": False},
+            {"name": "Verified", "category": "resolved", "color": "#06b6d4", "order_index": 4, "is_initial": False, "is_final": False},
+            {"name": "Closed", "category": "closed", "color": "#64748b", "order_index": 5, "is_initial": False, "is_final": True},
+        ]
+        # A. Seed for BugForge company
+        for s_def in default_statuses:
+            existing = db.query(IssueStatus).filter(
+                IssueStatus.name == s_def["name"],
+                IssueStatus.company_id == company_id,
+            ).first()
+            if not existing:
+                db.add(IssueStatus(
+                    name=s_def["name"],
+                    category=s_def["category"],
+                    color=s_def["color"],
+                    order_index=s_def["order_index"],
+                    is_initial=s_def["is_initial"],
+                    is_final=s_def["is_final"],
+                    is_active=True,
+                    company_id=company_id,
+                ))
+            elif existing.category != s_def["category"]:
+                existing.category = s_def["category"]
+
+        # B. Seed global fallbacks (company_id is None)
+        for s_def in default_statuses:
+            existing_global = db.query(IssueStatus).filter(
+                IssueStatus.name == s_def["name"],
+                IssueStatus.company_id.is_(None),
+            ).first()
+            if not existing_global:
+                db.add(IssueStatus(
+                    name=s_def["name"],
+                    category=s_def["category"],
+                    color=s_def["color"],
+                    order_index=s_def["order_index"],
+                    is_initial=s_def["is_initial"],
+                    is_final=s_def["is_final"],
+                    is_active=True,
+                    company_id=None,
+                ))
+            elif existing_global.category != s_def["category"]:
+                existing_global.category = s_def["category"]
+
+        # 2. Issue Priorities (global)
         priorities = ["Low", "Medium", "High", "Critical"]
         for name in priorities:
             if not db.query(IssuePriority).filter(IssuePriority.name == name).first():
                 db.add(IssuePriority(name=name, is_active=True))
 
-        # 3. Issue Severities
+        # 3. Issue Severities (global)
         severities = ["Low", "Medium", "High", "Critical"]
         for name in severities:
             if not db.query(IssueSeverity).filter(IssueSeverity.name == name).first():
                 db.add(IssueSeverity(name=name, is_active=True))
 
-        # 4. Issue Categories
+        # 4. Issue Categories (company-scoped)
         categories = ["UI", "Backend", "Database", "API"]
         for name in categories:
-            if not db.query(IssueCategory).filter(IssueCategory.name == name).first():
-                db.add(IssueCategory(name=name, is_active=True))
+            if not db.query(IssueCategory).filter(
+                IssueCategory.name == name, IssueCategory.company_id == company_id
+            ).first():
+                db.add(IssueCategory(name=name, is_active=True, company_id=company_id))
 
-        # 5. Issue Modules
+        # 5. Issue Modules (company-scoped)
         modules = ["Authentication", "User Management", "Reporting", "Notifications"]
         for name in modules:
-            if not db.query(IssueModule).filter(IssueModule.name == name).first():
-                db.add(IssueModule(name=name, is_active=True))
+            if not db.query(IssueModule).filter(
+                IssueModule.name == name, IssueModule.company_id == company_id
+            ).first():
+                db.add(IssueModule(name=name, is_active=True, company_id=company_id))
 
         # 6. Sprint Statuses
         sprint_statuses = ["Planned", "Active", "Completed"]
@@ -77,7 +142,8 @@ def init_db() -> None:
 
         # 7. Roles
         roles_data = [
-            ("Admin", "Administrator with full access"),
+            ("Super Admin", "Platform-level administrator with access to all companies"),
+            ("Admin", "Company administrator with full access within their company"),
             ("Developer", "Developer role"),
             ("QA", "Quality Assurance role"),
             ("Reporter", "Reporter role"),
@@ -171,14 +237,35 @@ def init_db() -> None:
                         {"r": tl_role.id, "p": p.id}
                     )
 
-        # 10. Default Core Team
+        # 10. Default Core Team (with company_id)
         core_team = db.query(Team).filter(Team.name == "BugForge Core Team").first()
         if not core_team:
             db.add(Team(
                 name="BugForge Core Team",
                 description="Primary engineering and cross-functional defect resolution team",
+                company_id=company_id,
                 is_active=True
             ))
+
+        # 11. Super Admin user (from environment variables or defaults)
+        super_admin_email = os.environ.get("SUPER_ADMIN_EMAIL", "vln@superadmin.in")
+        super_admin_password = os.environ.get("SUPER_ADMIN_PASSWORD", "admin@123")
+        existing_super = db.query(User).filter(User.email == super_admin_email.lower()).first()
+        if not existing_super:
+            super_role = db.query(Role).filter(Role.name == "Super Admin").first()
+            if super_role:
+                super_user = User(
+                    full_name="Super Admin",
+                    email=super_admin_email.lower().strip(),
+                    password_hash=hash_password(super_admin_password),
+                    is_active=True,
+                    is_system_user=False,
+                    company_id=None,  # Super Admin has no company
+                )
+                db.add(super_user)
+                db.flush()
+                super_user.roles = [super_role]
+                print(f"Created Super Admin user: {super_admin_email}")
 
         db.commit()
         print("Database schema and seed data initialized successfully!")

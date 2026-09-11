@@ -10,26 +10,45 @@ class ProjectService:
     def __init__(self):
         self.repository = ProjectRepository()
 
-    def list(self, db: Session, **kwargs):
+    def list(self, db: Session, company_id: int | None = None, **kwargs):
         print("services/project_service.py Fetching all projects")
-        return self.repository.list(db)
+        return self.repository.list(db, company_id=company_id, **kwargs)
         
-    def list_by_manager(self, db: Session, manager_id: int, **kwargs):
-        return self.repository.list(db)
+    def list_by_manager(self, db: Session, manager_id: int, company_id: int | None = None, **kwargs):
+        return self.repository.list_by_manager(db, manager_id, company_id=company_id, **kwargs)
         
-    def list_by_leader(self, db: Session, leader_id: int, **kwargs):
-        return self.repository.list(db)
+    def list_by_leader(self, db: Session, leader_id: int, company_id: int | None = None, **kwargs):
+        return self.repository.list_by_leader(db, leader_id, company_id=company_id, **kwargs)
 
-    def get(self, db: Session, project_id: int):
+    def get(self, db: Session, project_id: int, company_id: int | None = None):
         print(f"services/project_service.py Fetching project with ID {project_id}")
-        project = self.repository.get(db, project_id)
+        project = self.repository.get(db, project_id, company_id=company_id)
         if not project:
             print("services/project_service.py Project not found")
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
         return project
 
+    def _validate_members(self, db: Session, pm_id: int | None, tl_id: int | None, company_id: int | None):
+        if company_id is None:
+            return
+        if pm_id:
+            pm = db.query(User).filter(User.id == pm_id).first()
+            if not pm:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Project manager does not exist")
+            if getattr(pm, 'company_id', None) != company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot assign project manager from another company")
+        if tl_id:
+            tl = db.query(User).filter(User.id == tl_id).first()
+            if not tl:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Team leader does not exist")
+            if getattr(tl, 'company_id', None) != company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot assign team leader from another company")
+
     def create(self, db: Session, data: ProjectCreate, user: User):
         print(f"services/project_service.py Creating project with name: {data.name}")
+        company_id = user.company_id or 1
+        self._validate_members(db, data.project_manager_id, data.team_leader_id, company_id)
+
         project = Project(
             name=data.name.strip(),
             key=data.key.strip().upper(),
@@ -43,13 +62,15 @@ class ProjectService:
             tech_stack=data.tech_stack,
             project_manager_id=data.project_manager_id,
             team_leader_id=data.team_leader_id,
+            company_id=company_id,
             created_by=user.id
         )
         return self.repository.create(db, project)
 
     def update(self, db: Session, project_id: int, data: ProjectUpdate, user: User):
         print(f"services/project_service.py Updating project with ID {project_id}")
-        project = self.get(db, project_id)
+        project = self.get(db, project_id, company_id=user.company_id)
+        self._validate_members(db, data.project_manager_id, data.team_leader_id, user.company_id)
         
         project.name = data.name.strip()
         project.key = data.key.strip().upper()
@@ -66,15 +87,14 @@ class ProjectService:
         
         db.commit()
         db.refresh(project)
-        return self.repository.get(db, project.id)
+        return self.repository.get(db, project.id, company_id=user.company_id)
 
-    def delete(self, db: Session, project_id: int):
+    def delete(self, db: Session, project_id: int, user: User | None = None):
         print(f"services/project_service.py Deleting project with ID {project_id}")
-        project = self.get(db, project_id)
+        company_id = user.company_id if user else None
+        project = self.get(db, project_id, company_id=company_id)
         
         # Cascade soft-delete to issues
-        from app.repositories.issue_repository import IssueRepository
-        issue_repo = IssueRepository()
         for issue in project.issues:
             issue.is_deleted = True
         

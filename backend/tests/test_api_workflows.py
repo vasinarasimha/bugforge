@@ -151,6 +151,7 @@ class TestIssueStatusAndAssignmentAPI:
     def test_update_issue_assignee_as_admin(self, mock_admin):
         from app.api.dependencies.auth import get_current_user
         from app.core.database import get_db
+        mock_admin.company_id = 1
         app.dependency_overrides[get_current_user] = lambda: mock_admin
 
         mock_db = MagicMock()
@@ -165,6 +166,7 @@ class TestIssueStatusAndAssignmentAPI:
                 mock_issue.id = 5
                 mock_issue.assigned_to = 10
                 mock_issue_svc.get.return_value = mock_issue
+                mock_issue_svc.assign_developer.return_value = mock_issue
 
                 mock_target_user = MagicMock()
                 mock_target_user.id = 10
@@ -211,7 +213,6 @@ class TestIssueStatusAndAssignmentAPI:
                 response = client.patch("/api/issues/5/assign", json={"assigned_to": 10})
                 assert response.status_code == 200
                 assert response.json()["assigned_to"] == 10
-                mock_db.commit.assert_called_once()
 
         finally:
             app.dependency_overrides.pop(get_current_user, None)
@@ -220,6 +221,8 @@ class TestIssueStatusAndAssignmentAPI:
     def test_update_issue_assignee_forbidden_for_developer(self, mock_developer):
         from app.api.dependencies.auth import get_current_user
         from app.core.database import get_db
+        from fastapi import HTTPException
+        mock_developer.company_id = 1
         app.dependency_overrides[get_current_user] = lambda: mock_developer
 
         mock_db = MagicMock()
@@ -227,9 +230,7 @@ class TestIssueStatusAndAssignmentAPI:
 
         try:
             with patch("app.api.routes.issues.service") as mock_issue_svc:
-                mock_issue = MagicMock()
-                mock_issue.id = 5
-                mock_issue_svc.get.return_value = mock_issue
+                mock_issue_svc.assign_developer.side_effect = HTTPException(status_code=403, detail="Not authorized")
 
                 response = client.patch("/api/issues/5/assign", json={"assigned_to": 10})
                 assert response.status_code == 403

@@ -10,10 +10,12 @@ import {
   createIssue, updateIssue, deleteIssue, uploadFile,
   getIssueAttachments, addIssueAttachment, deleteIssueAttachment,
   getIssueHistory, getIssueComments, addIssueComment, updateIssueStatus, updateIssueAssignee,
-  semanticSearch, getSimilarIssues, searchIssues, getIssue
+  semanticSearch, getSimilarIssues, searchIssues, getIssue,
+  assignIssueTeam, qaVerifyIssue
 } from '../../services/issueService'
 import { getSprints } from '../../services/sprintService'
 import { getProjects } from '../../services/projectService'
+import { getTeams } from '../../services/teamService'
 import { formatIssue, getResolutionAssistance } from '../../services/aiService'
 import { useAuth } from '../../hooks/useAuth'
 import { getUsers } from '../../services/authService'
@@ -55,9 +57,9 @@ export default function ReportedIssuesPage() {
   const location = useLocation()
   const userRole = user?.role || user?.roles?.[0]?.name || ''
   const userRoles = user?.roles?.map(r => r.name) || [userRole]
-  const canDeleteIssue = userRole === 'Admin' || userRole === 'QA' || userRole === 'Project Manager'
-  const canAccessTestIntelligence = userRoles.some(r => ['Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
-  const canAssignIssues = userRoles.some(r => ['Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
+  const canDeleteIssue = ['Admin', 'Super Admin', 'QA', 'Project Manager'].includes(userRole) || userRoles.some(r => ['Admin', 'Super Admin', 'QA', 'Project Manager'].includes(r))
+  const canAccessTestIntelligence = userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
+  const canAssignIssues = userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
 
   const BACKEND_TO_FRONTEND_ISSUE_TYPE = {
     Defect: 'Bug',
@@ -130,12 +132,18 @@ export default function ReportedIssuesPage() {
   const [resolveError, setResolveError] = useState('')
   const [resolving, setResolving] = useState(false)
 
+  // Feature workflow & QA verification state
+  const [internalTeams, setInternalTeams] = useState([])
+  const [selectedTeamId, setSelectedTeamId] = useState('')
+  const [assigningTeam, setAssigningTeam] = useState(false)
+  const [qaNotes, setQaNotes] = useState('')
+  const [qaVerifying, setQaVerifying] = useState(false)
+
   const isBug = form.issue_type === 'Bug' || form.issue_type === 'Defect'
 
   const load = async () => {
-    const [issueResult, statusResult, priorityResult, severityResult, categoryResult, moduleResult, projResult, userResult] = await Promise.all([
-      getIssues(), getStatuses(), getPriorities(), getSeverities(), getCategories(), getModules(), getProjects('', 1000, 0), getUsers('', 1000, 0)
-
+    const [issueResult, statusResult, priorityResult, severityResult, categoryResult, moduleResult, projResult, userResult, teamResult] = await Promise.all([
+      getIssues(), getStatuses(), getPriorities(), getSeverities(), getCategories(), getModules(), getProjects('', 1000, 0), getUsers('', 1000, 0), getTeams().catch(() => ({ data: [] }))
     ])
     setIssues(issueResult.data)
     setStatuses(statusResult.data)
@@ -145,6 +153,7 @@ export default function ReportedIssuesPage() {
     setModules(moduleResult.data)
     setAllProjects(projResult.data)
     setAllUsers(userResult.data?.data || [])
+    setInternalTeams(teamResult.data?.data || teamResult.data || [])
   }
 
   useEffect(() => { load().catch(() => setError('Unable to load issues.')) }, [])
@@ -242,6 +251,7 @@ export default function ReportedIssuesPage() {
     setResolutionAssistanceError('')
     setShowTestIntelligence(false)
     setEditing(issue)
+    const openStatusId = statuses.find(s => s.name === 'Open')?.id || statuses[0]?.id || ''
     setForm(issue
       ? {
           title: issue.title,
@@ -264,10 +274,12 @@ export default function ReportedIssuesPage() {
           attachment_path: issue.attachment_path || '',
           sprint_id: issue.sprint_id || ''
         }
-      : empty
+      : { ...empty, status_id: openStatusId }
     )
     setFile(null)
     setAttachments([])
+    setSelectedTeamId(issue?.team_id || '')
+    setQaNotes('')
     setError('')
     setShowForm(true)
     if (issue) {
@@ -432,6 +444,69 @@ export default function ReportedIssuesPage() {
     }
   }
 
+  const handleAssignTeam = async () => {
+    if (!editing || !selectedTeamId) return
+    setAssigningTeam(true)
+    setError('')
+    try {
+      const res = await assignIssueTeam(editing.id, { team_id: Number(selectedTeamId) })
+      const updatedIssue = res.data
+      setEditing(prev => ({
+        ...prev,
+        team_id: updatedIssue.team_id,
+        team_name: updatedIssue.team_name,
+        status_id: updatedIssue.status_id,
+        status_name: updatedIssue.status_name,
+      }))
+      setIssues(prev => prev.map(iss => iss.id === editing.id ? {
+        ...iss,
+        team_id: updatedIssue.team_id,
+        team_name: updatedIssue.team_name,
+        status_id: updatedIssue.status_id,
+        status_name: updatedIssue.status_name,
+      } : iss))
+    } catch (err) {
+      console.error("Failed to assign team:", err)
+      setError(err.response?.data?.detail || 'Failed to assign team.')
+    } finally {
+      setAssigningTeam(false)
+    }
+  }
+
+  const handleQAVerify = async (qaState) => {
+    if (!editing) return
+    setQaVerifying(true)
+    setError('')
+    try {
+      const res = await qaVerifyIssue(editing.id, { qa_state: qaState, notes: qaNotes })
+      const updatedIssue = res.data
+      setEditing(prev => ({
+        ...prev,
+        qa_state: updatedIssue.qa_state,
+        qa_verified_by_name: updatedIssue.qa_verified_by_name,
+        qa_verified_at: updatedIssue.qa_verified_at,
+        status_id: updatedIssue.status_id,
+        status_name: updatedIssue.status_name,
+      }))
+      setForm(prev => ({
+        ...prev,
+        status_id: updatedIssue.status_id,
+      }))
+      setIssues(prev => prev.map(iss => iss.id === editing.id ? {
+        ...iss,
+        qa_state: updatedIssue.qa_state,
+        status_id: updatedIssue.status_id,
+        status_name: updatedIssue.status_name
+      } : iss))
+      setQaNotes('')
+    } catch (err) {
+      console.error("Failed to verify QA state:", err)
+      setError(err.response?.data?.detail || 'Failed to verify QA state.')
+    } finally {
+      setQaVerifying(false)
+    }
+  }
+
   const handleGetResolutionAssistance = async () => {
     if (!editing) return
     setResolutionAssistanceLoading(true)
@@ -561,7 +636,7 @@ export default function ReportedIssuesPage() {
     (`${issue.id} ${issue.title}`.toLowerCase().includes(query.toLowerCase()))
   )
 
-  const isFormClosedAndReadOnly = editing && (statuses.find(s => String(s.id) === String(editing.status_id))?.name === 'Closed') && !userRoles.includes('Admin')
+  const isFormClosedAndReadOnly = editing && (statuses.find(s => String(s.id) === String(editing.status_id))?.name === 'Closed') && !userRoles.includes('Admin') && !userRoles.includes('Super Admin')
   const canSubmit = form.title?.trim() && form.description?.trim() && form.description?.trim().length >= 20 && !uploading && !isFormClosedAndReadOnly
 
   return (
@@ -900,7 +975,7 @@ export default function ReportedIssuesPage() {
               )}
             </div>
             {/* Search mode toggle */}
-            <div style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: '1.5px solid rgba(15,23,42,0.10)' }}>
+            <div className="issue-filters-toggle" style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: '1.5px solid rgba(15,23,42,0.10)' }}>
               <button
                 type="button"
                 onClick={() => { setSearchMode('keyword'); setSemanticResults([]); setSemanticQuery('') }}
@@ -924,20 +999,19 @@ export default function ReportedIssuesPage() {
               <option value="">All statuses</option>
               {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <div style={{ width: '220px' }}>
-              <select className="if-select"
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-                placeholder="All projects"
-              >
-                <option value="">All projects</option>
-                {allProjects.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              className="if-select"
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+              placeholder="All projects"
+            >
+              <option value="">All projects</option>
+              {allProjects.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
           {error && <div className="alert alert-danger">{error}</div>}
 
@@ -1023,8 +1097,8 @@ export default function ReportedIssuesPage() {
                   </>
                 ) : <>✨ AI Clean & Triage</>}
               </button>
-              {/* AI Resolution Assistance Button - only for Developer/Project Manager/Admin/TL and when editing a Bug/Defect */}
-              {editing && isBug && (userRoles.includes('Developer') || userRoles.includes('Project Manager') || userRoles.includes('Admin') || userRoles.includes('Team Leader')) && (
+              {/* AI Resolution Assistance Button - only for Developer/Project Manager/Admin/Super Admin/TL and when editing a Bug/Defect */}
+              {editing && isBug && (userRoles.includes('Developer') || userRoles.includes('Project Manager') || userRoles.includes('Admin') || userRoles.includes('Super Admin') || userRoles.includes('Team Leader')) && (
                 <button type="button" className="if-assistant-btn" onClick={handleGetResolutionAssistance}
                   disabled={resolutionAssistanceLoading}>
                   {resolutionAssistanceLoading ? (
@@ -1162,7 +1236,7 @@ export default function ReportedIssuesPage() {
                     </FieldGroup>
                     <FieldGroup label="Status" required>
                       {(() => {
-                        const canChangeStatus = userRoles.includes('Admin') || userRoles.includes('Project Manager') || userRoles.includes('Team Leader');
+                        const canChangeStatus = userRoles.includes('Admin') || userRoles.includes('Super Admin') || userRoles.includes('Project Manager') || userRoles.includes('Team Leader');
                         if (canChangeStatus) {
                           return (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1176,7 +1250,7 @@ export default function ReportedIssuesPage() {
                           );
                         }
 
-                        const currentName = statuses.find(s => String(s.id) === String(form.status_id))?.name || 'Unknown';
+                        const currentName = statuses.find(s => String(s.id) === String(form.status_id))?.name || (editing ? 'Unknown' : 'Open');
                         const isDev = userRoles.includes('Developer');
                         const isQA = userRoles.includes('QA');
                         const isReporterRole = userRoles.includes('Reporter');
@@ -1292,6 +1366,125 @@ export default function ReportedIssuesPage() {
                     </FieldGroup>
                   </div>
                 </SectionCard>
+
+                {/* Feature Engineering & Workflow Lifecycle Section */}
+                {(form.issue_type === 'Feature' || editing?.issue_type === 'Feature' || editing?.requesting_company_name) && (
+                  <SectionCard icon="🚀" title="Feature Engineering & Lifecycle">
+                    {editing?.requesting_company_name && (
+                      <div className="p-3 mb-3 border rounded-3 text-xs d-flex align-items-center justify-content-between" style={{ backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }}>
+                        <div className="d-flex align-items-center gap-2">
+                          <i className="bi bi-building text-primary font-bold" />
+                          <span className="text-slate-800">
+                            <strong>Requesting Organization:</strong> <span className="badge bg-primary px-2 py-0.5 ms-1">{editing.requesting_company_name}</span>
+                          </span>
+                        </div>
+                        {editing.reporter_name && (
+                          <span className="text-slate-600">
+                            Requested by: <strong>{editing.reporter_name}</strong>
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="if-grid-2">
+                      {/* Internal Team Assignment */}
+                      <FieldGroup label="Assigned Internal Team" hint="BugForge squad responsible for implementation">
+                        {userRoles.includes('Super Admin') ? (
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <select
+                              className="if-select"
+                              value={selectedTeamId || ''}
+                              onChange={(e) => setSelectedTeamId(e.target.value)}
+                              disabled={assigningTeam}
+                            >
+                              <option value="">Select internal squad...</option>
+                              {internalTeams.map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-primary flex-shrink-0"
+                              onClick={handleAssignTeam}
+                              disabled={assigningTeam || !selectedTeamId || String(selectedTeamId) === String(editing?.team_id)}
+                            >
+                              {assigningTeam ? 'Assigning...' : 'Assign Team'}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="p-2.5 bg-light rounded border text-sm font-semibold text-slate-800">
+                            {editing?.team_name ? `👥 ${editing.team_name}` : 'Unassigned to squad'}
+                          </div>
+                        )}
+                      </FieldGroup>
+
+                      {/* QA Verification State */}
+                      <FieldGroup label="QA Verification State" hint="Quality assurance sign-off status">
+                        <div className="d-flex align-items-center gap-2" style={{ height: '44px' }}>
+                          <span
+                            className="badge px-3 py-2 text-xs font-semibold"
+                            style={{
+                              backgroundColor:
+                                editing?.qa_state === 'Passed'
+                                  ? '#10b981'
+                                  : editing?.qa_state === 'Requires Rework'
+                                  ? '#ef4444'
+                                  : '#f59e0b',
+                              color: '#fff',
+                            }}
+                          >
+                            {editing?.qa_state || 'Pending Verification'}
+                          </span>
+                          {editing?.qa_verified_by_name && (
+                            <span className="text-muted text-xs">
+                              Verified by {editing.qa_verified_by_name}
+                            </span>
+                          )}
+                        </div>
+                      </FieldGroup>
+                    </div>
+
+                    {/* QA Actions for authorized roles */}
+                    {editing && (userRoles.includes('QA') || userRoles.includes('Super Admin') || userRoles.includes('Admin') || userRoles.includes('Project Manager') || userRoles.includes('Team Leader')) && (
+                      <div className="mt-3 p-3 bg-light rounded-3 border">
+                        <label className="text-xs font-semibold text-slate-700 mb-1.5 d-block">
+                          QA Sign-off & Verification Decision
+                        </label>
+                        <div className="mb-2">
+                          <input
+                            type="text"
+                            className="form-control form-control-sm text-xs"
+                            placeholder="Add QA test verification notes or rework instructions..."
+                            value={qaNotes}
+                            onChange={(e) => setQaNotes(e.target.value)}
+                          />
+                        </div>
+                        <div className="d-flex gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-success text-xs font-semibold d-flex align-items-center gap-1.5 shadow-sm"
+                            onClick={() => handleQAVerify('Passed')}
+                            disabled={qaVerifying}
+                          >
+                            <i className="bi bi-check-circle" />
+                            <span>{qaVerifying ? 'Verifying...' : 'Approve & Verify (Passed)'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger text-xs font-semibold d-flex align-items-center gap-1.5 shadow-sm"
+                            onClick={() => handleQAVerify('Requires Rework')}
+                            disabled={qaVerifying}
+                          >
+                            <i className="bi bi-arrow-counterclockwise" />
+                            <span>{qaVerifying ? 'Updating...' : 'Request Rework'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </SectionCard>
+                )}
 
                 {/* Description */}
                 <SectionCard icon={isBug ? "📝" : "📋"} title={isBug ? "Description" : "Details & Description"}>
