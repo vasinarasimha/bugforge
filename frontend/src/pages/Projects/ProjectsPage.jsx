@@ -6,6 +6,7 @@ import { getUsers } from '../../services/authService'
 import { useAuth } from '../../hooks/useAuth'
 import { getFieldLabel } from '../../utils/activityHelper'
 import { useLocation } from 'react-router-dom'
+import SearchableSelect from '../../components/common/SearchableSelect'
 
 export default function ProjectsPage() {
   const { user } = useAuth()
@@ -230,9 +231,13 @@ export default function ProjectsPage() {
                   </div>
                   <div className="col-md-6">
                     <label className="form-label required">Status</label>
-                    <select required className="if-select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                      {['Active', 'Archived', 'Completed', 'On Hold'].map((v) => <option key={v}>{v}</option>)}
-                    </select>
+                    <SearchableSelect
+                      placeholder="Select status..."
+                      isClearable={false}
+                      options={['Active', 'Archived', 'Completed', 'On Hold'].map((v) => ({ value: v, label: v }))}
+                      value={form.status}
+                      onChange={(val) => setForm({ ...form, status: val })}
+                    />
                   </div>
                 </div>
 
@@ -274,24 +279,30 @@ export default function ProjectsPage() {
                   </div>
                 </div>
 
-                {/* Project Manager Select */}
+                {/* Project Manager & Team Leader Selects */}
                 <div className="row mb-3">
                   <div className="col-md-6">
                     <label className="form-label">Project Manager</label>
-                    <select required className="if-select" value={form.project_manager_id || ''} onChange={(e) => setForm({ ...form, project_manager_id: e.target.value ? parseInt(e.target.value) : null })}>
-                        <option value="">Select Project Manager...</option>
-                        {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-                      </select>
+                    <SearchableSelect
+                      placeholder="Select Project Manager..."
+                      isClearable
+                      options={users.map(u => ({ value: u.id, label: u.full_name }))}
+                      value={form.project_manager_id || null}
+                      onChange={(val) => setForm({ ...form, project_manager_id: val ? parseInt(val) : null })}
+                    />
                     {usersLoading && form.project_manager_id === null && (
                       <div className="text-small text-muted mt-1">Loading users...</div>
                     )}
                   </div>
                   <div className="col-md-6">
                     <label className="form-label">Team Leader</label>
-                    <select required className="if-select" value={form.team_leader_id || ''} onChange={(e) => setForm({ ...form, team_leader_id: e.target.value ? parseInt(e.target.value) : null })}>
-                        <option value="">Select Team Leader...</option>
-                        {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
-                      </select>
+                    <SearchableSelect
+                      placeholder="Select Team Leader..."
+                      isClearable
+                      options={users.map(u => ({ value: u.id, label: u.full_name }))}
+                      value={form.team_leader_id || null}
+                      onChange={(val) => setForm({ ...form, team_leader_id: val ? parseInt(val) : null })}
+                    />
                     {usersLoading && form.team_leader_id === null && (
                       <div className="text-small text-muted mt-1">Loading users...</div>
                     )}

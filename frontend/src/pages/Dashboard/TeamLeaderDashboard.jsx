@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { getTLStats } from '../../services/dashboardService'
+import { isIssueUnassignedOver24Hours, isClientFeatureRequest } from '../../components/IssueTable/IssueTable'
 
 const fmt = (n) => (n || 0).toLocaleString()
 const timeAgo = (iso) => {
@@ -192,28 +193,58 @@ function RecentFeed({ issues }) {
         <div className="tl-empty">No recent issues.</div>
       ) : (
         <div className="tl-feed-list">
-          {issues.map(i => (
-            <div key={i.id} className="tl-feed-item">
-              <span className="tl-feed-type">{TYPE_ICONS[i.issue_type] || '📋'}</span>
-              <div className="tl-feed-body">
-                <div className="tl-feed-title">
-                  <span className="tl-feed-key">{i.issue_key}</span>
-                  {i.title}
+          {issues.map(i => {
+            const isOverdue = isIssueUnassignedOver24Hours(i)
+            const isFeature = isClientFeatureRequest(i)
+            return (
+              <div
+                key={i.id}
+                className={`tl-feed-item ${isOverdue ? 'tl-feed-item-overdue' : ''}`}
+                style={isOverdue ? { backgroundColor: 'rgba(254, 242, 242, 0.75)', borderLeft: '3px solid #ef4444' } : {}}
+              >
+                <span className="tl-feed-type">{TYPE_ICONS[i.issue_type] || '📋'}</span>
+                <div className="tl-feed-body">
+                  <div className="tl-feed-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <span className="tl-feed-key">{i.issue_key}</span>
+                    <span>{i.title}</span>
+                    {isFeature && (
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 600,
+                          padding: '1px 6px',
+                          borderRadius: '9999px',
+                          background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                          color: '#ffffff',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px'
+                        }}
+                      >
+                        <i className="bi bi-stars" style={{ fontSize: '0.65rem' }} /> Client Feature
+                      </span>
+                    )}
+                    {isOverdue && (
+                      <span className="badge bg-danger text-white" style={{ fontSize: '0.65rem', fontWeight: 700, padding: '1px 5px' }}>
+                        &gt;24h Unassigned
+                      </span>
+                    )}
+                  </div>
+                  <div className="tl-feed-meta">
+                    <span>{i.project_name}</span>
+                    {i.reporter_name && <span>by {i.reporter_name}</span>}
+                    <span className="tl-feed-time">{timeAgo(i.updated_at)}</span>
+                  </div>
                 </div>
-                <div className="tl-feed-meta">
-                  <span>{i.project_name}</span>
-                  {i.reporter_name && <span>by {i.reporter_name}</span>}
-                  <span className="tl-feed-time">{timeAgo(i.updated_at)}</span>
-                </div>
+                <span className="tl-status-tag" style={{ color: STATUS_COLORS[i.status_name], background: STATUS_BG[i.status_name] || 'rgba(15,23,42,0.06)' }}>
+                  {i.status_name}
+                </span>
+                <span className="pm-issue-action" style={{ marginLeft: '12px' }}>
+                  <Link to="/issues" state={{ editIssue: i }} className="btn btn-sm btn-outline-primary" style={{ padding: '2px 8px', fontSize: '0.7rem', fontWeight: 'bold' }}>Assign</Link>
+                </span>
               </div>
-              <span className="tl-status-tag" style={{ color: STATUS_COLORS[i.status_name], background: STATUS_BG[i.status_name] || 'rgba(15,23,42,0.06)' }}>
-                {i.status_name}
-              </span>
-              <span className="pm-issue-action" style={{ marginLeft: '12px' }}>
-                <Link to="/issues" state={{ editIssue: i }} className="btn btn-sm btn-outline-primary" style={{ padding: '2px 8px', fontSize: '0.7rem', fontWeight: 'bold' }}>Assign</Link>
-              </span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

@@ -32,6 +32,7 @@ export default function App() {
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/issues" element={<ReportedIssuesPage />} />
+          <Route path="/issues/:id" element={<ReportedIssuesPage />} />
           <Route path="/sprints" element={<SprintPlanningPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/employees" element={<EmployeeManagementPage />} />

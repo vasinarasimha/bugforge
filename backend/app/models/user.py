@@ -55,6 +55,7 @@ class User(Base):
     projects: Mapped[list["Project"]] = relationship(back_populates="creator", foreign_keys="Project.created_by")
     reported_issues: Mapped[list["Issue"]] = relationship(foreign_keys="Issue.reporter_id", back_populates="reporter")
     assigned_issues: Mapped[list["Issue"]] = relationship(foreign_keys="Issue.assigned_to", back_populates="assignee")
+    assigned_qa_issues: Mapped[list["Issue"]] = relationship(foreign_keys="Issue.assigned_qa_id", back_populates="assigned_qa")
     notifications: Mapped[list["Notification"]] = relationship(
         back_populates="recipient",
         foreign_keys="Notification.recipient_id",

@@ -7,6 +7,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.company import Company
     from app.models.user import User
+    from app.models.issue import Issue
 
 
 class CustomizationRequest(Base):
@@ -21,6 +22,7 @@ class CustomizationRequest(Base):
     )
     title: Mapped[str] = mapped_column(String(150), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    request_type: Mapped[str] = mapped_column(String(30), nullable=False, default="Feature")
     category: Mapped[str] = mapped_column(String(50), nullable=False, default="Workflow")
     requested_behavior: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="Pending", index=True)
@@ -29,6 +31,9 @@ class CustomizationRequest(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    linked_issue_id: Mapped[int | None] = mapped_column(
+        ForeignKey("issues.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -39,3 +44,5 @@ class CustomizationRequest(Base):
     company: Mapped["Company"] = relationship(back_populates="customization_requests")
     requester: Mapped["User"] = relationship(foreign_keys=[requester_id])
     reviewer: Mapped["User | None"] = relationship(foreign_keys=[reviewed_by_id])
+    linked_issue: Mapped["Issue | None"] = relationship(foreign_keys=[linked_issue_id])
+

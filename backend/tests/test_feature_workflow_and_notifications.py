@@ -102,6 +102,11 @@ def workflow_setup(db_session: Session):
         )
         db_session.add(super_admin)
         db_session.flush()
+    else:
+        super_admin.company_id = 1
+        super_admin.is_active = True
+        super_admin.roles = [roles_dict["Super Admin"]]
+        db_session.flush()
 
     # 4. BugForge TL, PM, Dev, QA
     bf_pm = db_session.query(User).filter(User.email == "pm_workflow_test@bugforge.test").first()
@@ -116,6 +121,11 @@ def workflow_setup(db_session: Session):
         )
         db_session.add(bf_pm)
         db_session.flush()
+    else:
+        bf_pm.company_id = 1
+        bf_pm.is_active = True
+        bf_pm.roles = [roles_dict["Project Manager"]]
+        db_session.flush()
 
     bf_tl = db_session.query(User).filter(User.email == "tl_workflow_test@bugforge.test").first()
     if not bf_tl:
@@ -128,6 +138,11 @@ def workflow_setup(db_session: Session):
             roles=[roles_dict["Team Leader"]]
         )
         db_session.add(bf_tl)
+        db_session.flush()
+    else:
+        bf_tl.company_id = 1
+        bf_tl.is_active = True
+        bf_tl.roles = [roles_dict["Team Leader"]]
         db_session.flush()
 
     bf_dev = db_session.query(User).filter(User.email == "dev_workflow_test@bugforge.test").first()
@@ -142,6 +157,11 @@ def workflow_setup(db_session: Session):
         )
         db_session.add(bf_dev)
         db_session.flush()
+    else:
+        bf_dev.company_id = 1
+        bf_dev.is_active = True
+        bf_dev.roles = [roles_dict["Developer"]]
+        db_session.flush()
 
     bf_qa = db_session.query(User).filter(User.email == "qa_workflow_test@bugforge.test").first()
     if not bf_qa:
@@ -154,6 +174,11 @@ def workflow_setup(db_session: Session):
             roles=[roles_dict["QA"]]
         )
         db_session.add(bf_qa)
+        db_session.flush()
+    else:
+        bf_qa.company_id = 1
+        bf_qa.is_active = True
+        bf_qa.roles = [roles_dict["QA"]]
         db_session.flush()
 
     # 5. Internal BugForge Team
@@ -188,6 +213,11 @@ def workflow_setup(db_session: Session):
         )
         db_session.add(admin_a)
         db_session.flush()
+    else:
+        admin_a.company_id = company_a.id
+        admin_a.is_active = True
+        admin_a.roles = [roles_dict["Admin"]]
+        db_session.flush()
 
     # 7. Customer Company B & Admin
     company_b = db_session.query(Company).filter(Company.name == "Stark Labs Customer").first()
@@ -207,6 +237,11 @@ def workflow_setup(db_session: Session):
             roles=[roles_dict["Admin"]]
         )
         db_session.add(admin_b)
+        db_session.flush()
+    else:
+        admin_b.company_id = company_b.id
+        admin_b.is_active = True
+        admin_b.roles = [roles_dict["Admin"]]
         db_session.flush()
 
     # 8. BugForge Internal Project
@@ -463,7 +498,7 @@ def test_feature_closure_notifies_customer_company(db_session: Session, workflow
 
     closed_status = db_session.query(IssueStatus).filter(
         IssueStatus.company_id == 1,
-        IssueStatus.is_final == True
+        (IssueStatus.category == "closed") | (IssueStatus.name == "Closed")
     ).first()
     if not closed_status:
         closed_status = IssueStatus(
@@ -498,10 +533,17 @@ def test_tenant_visibility_and_customer_data_masking(db_session: Session, workfl
     issues_a = IssueService().list(db_session, company_id=company_a.id)
     issues_b = IssueService().list(db_session, company_id=company_b.id)
 
-    # Feature requested by A must be in A's list
-    assert any(i.requesting_company_id == company_a.id for i in issues_a)
-    # Feature requested by A must NOT be in B's list
+    # Customer Company A and B should NOT see the BugForge-routed customization issue in Reported Issues
+    assert not any(i.requesting_company_id == company_a.id for i in issues_a)
     assert not any(i.requesting_company_id == company_a.id for i in issues_b)
+
+    # BugForge company members CAN see it in Reported Issues
+    issues_bf = IssueService().list(db_session, company_id=1, is_bugforge=True)
+    assert any(i.requesting_company_id == company_a.id for i in issues_bf)
+
+    # Customer Company A sees the request and implementation status in Customization Requests
+    customization_reqs = company_settings_service.list_customization_requests(db_session, company_id=company_a.id)
+    assert any(r.company_id == company_a.id for r in customization_reqs)
 
 
 def test_analytics_date_filter_boundary_consistency(db_session: Session, workflow_setup):

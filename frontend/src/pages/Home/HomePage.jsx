@@ -313,7 +313,7 @@ export default function HomePage() {
                               <span className={card.badgeType === 'p0' ? 'badge-p0 font-mono' : 'badge-p2 font-mono'}>
                                 {card.priority}
                               </span>
-                              <span className="ticket-id font-mono">#{card.id}</span>
+                              <span className="ticket-id font-mono">{card.id}</span>
                             </div>
                             <div className="ticket-title">{card.title}</div>
                             <div className="ticket-footer font-mono">
@@ -355,7 +355,7 @@ export default function HomePage() {
                             <div className="ticket-top-row">
                               <span className="badge-debug font-mono">{card.priority}</span>
                               <span className="ticket-id font-mono" style={{ color: 'var(--bf-forge)', fontWeight: 700 }}>
-                                #{card.id}
+                                {card.id}
                               </span>
                             </div>
                             <div className="ticket-title">{card.title}</div>
@@ -413,7 +413,7 @@ export default function HomePage() {
                                 <span className="material-symbols-outlined" style={{ fontSize: '12px' }}>check</span>
                                 {card.priority}
                               </span>
-                              <span className="ticket-id font-mono">#{card.id}</span>
+                              <span className="ticket-id font-mono">{card.id}</span>
                             </div>
                             <div className="ticket-title title-done">{card.title}</div>
                             <div className="ticket-footer font-mono">
@@ -904,7 +904,7 @@ export default function HomePage() {
             <div className="modal-header-styled">
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span className="font-mono" style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--bf-forge)' }}>
-                  #{selectedTicket.id}
+                  {selectedTicket.id}
                 </span>
                 <span className={`badge-${selectedTicket.badgeType} font-mono`}>
                   {selectedTicket.priority}

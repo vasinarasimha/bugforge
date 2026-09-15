@@ -21,14 +21,30 @@ class IssueRepository:
         selectinload(Issue.requesting_company),
         selectinload(Issue.team),
         selectinload(Issue.qa_verified_by),
+        selectinload(Issue.assigned_qa),
     )
 
-    def list(self, db: Session, reporter_id: int | None = None, project_ids: list[int] | None = None, company_id: int | None = None, issue_type: str | None = None, requesting_company_id: int | None = None) -> list[Issue]:
+    def list(
+        self,
+        db: Session,
+        reporter_id: int | None = None,
+        project_ids: list[int] | None = None,
+        company_id: int | None = None,
+        issue_type: str | None = None,
+        requesting_company_id: int | None = None,
+        is_bugforge: bool = False,
+        include_client_requests: bool = False,
+    ) -> list[Issue]:
         logger.debug("Fetching issues from the database")
         stmt = select(Issue).options(*self._options).where(Issue.is_deleted == False)
         if company_id is not None:
-            stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
-        if requesting_company_id is not None:
+            if is_bugforge:
+                stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id.isnot(None)))
+            elif include_client_requests:
+                stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
+            else:
+                stmt = stmt.where(Issue.company_id == company_id)
+        if requesting_company_id is not None and is_bugforge:
             stmt = stmt.where(Issue.requesting_company_id == requesting_company_id)
         if issue_type is not None:
             stmt = stmt.where(Issue.issue_type == issue_type)
@@ -46,11 +62,14 @@ class IssueRepository:
         )
         return list(db.scalars(stmt))
 
-    def get(self, db: Session, issue_id: int, company_id: int | None = None) -> Issue | None:
+    def get(self, db: Session, issue_id: int, company_id: int | None = None, is_bugforge: bool = False) -> Issue | None:
         logger.debug(f"Fetching issue with ID {issue_id} from the database")
         stmt = select(Issue).options(*self._options).where(Issue.id == issue_id, Issue.is_deleted == False)
         if company_id is not None:
-            stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
+            if is_bugforge:
+                stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id.isnot(None)))
+            else:
+                stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
         return db.scalar(stmt)
 
     def create(self, db: Session, issue: Issue) -> Issue:
@@ -96,7 +115,7 @@ class IssueRepository:
         )
 
         if company_id is not None:
-            stmt = stmt.where(Issue.company_id == company_id)
+            stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
         if exclude_issue_id is not None:
             stmt = stmt.where(Issue.id != exclude_issue_id)
         if project_id is not None:
@@ -139,7 +158,7 @@ class IssueRepository:
         )
 
         if company_id is not None:
-            stmt = stmt.where(Issue.company_id == company_id)
+            stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
         if exclude_issue_id is not None:
             stmt = stmt.where(Issue.id != exclude_issue_id)
         if project_id is not None:

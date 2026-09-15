@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_current_user, get_effective_company_id, is_super_admin
 from app.core.database import get_db
 from app.models.user import User
 from app.models.project import Project
@@ -49,9 +49,11 @@ async def list_projects(
 ):
     # Apply record rules based on user role
     user_roles = [r.name for r in current_user.roles]
-    cid = current_user.company_id
+    cid = get_effective_company_id(current_user)
 
-    if "Admin" in user_roles:
+    if "Super Admin" in user_roles:
+        projects = service.list(db, search=search, limit=limit, offset=offset)
+    elif "Admin" in user_roles:
         # Admin sees all projects within company
         projects = service.list(db, search=search, limit=limit, offset=offset, company_id=cid)
     elif "Project Manager" in user_roles:
@@ -69,7 +71,8 @@ async def list_projects(
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: int, db: Annotated[Session, Depends(get_db)], current_user: Annotated[User, Depends(get_current_user)]):
     # Apply record rules for individual project access
-    project = service.get(db, project_id, company_id=current_user.company_id)
+    cid = get_effective_company_id(current_user)
+    project = service.get(db, project_id, company_id=cid)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -77,7 +80,7 @@ async def get_project(project_id: int, db: Annotated[Session, Depends(get_db)], 
 
     # Check if user has access to this project
     has_access = False
-    if "Admin" in user_roles:
+    if "Super Admin" in user_roles or "Admin" in user_roles:
         has_access = True
     elif "Project Manager" in user_roles and project.project_manager_id == current_user.id:
         has_access = True
@@ -110,7 +113,7 @@ async def update_project(project_id: int, data: ProjectUpdate, db: Annotated[Ses
         raise HTTPException(status_code=403, detail="Not authorized to update projects")
 
     # Get the existing project to track changes
-    existing_project = service.get(db, project_id, company_id=user.company_id)
+    existing_project = service.get(db, project_id, company_id=get_effective_company_id(user))
     if not existing_project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -124,9 +127,9 @@ async def update_project(project_id: int, data: ProjectUpdate, db: Annotated[Ses
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_id: int, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
-    # Only Admin can delete projects (according to requirements)
+    # Only Super Admin and Admin can delete projects
     user_roles = [r.name for r in user.roles]
-    if "Admin" not in user_roles:
+    if "Super Admin" not in user_roles and "Admin" not in user_roles:
         raise HTTPException(status_code=403, detail="Not authorized to delete projects")
 
     service.delete(db, project_id, user=user)
@@ -134,18 +137,19 @@ async def delete_project(project_id: int, db: Annotated[Session, Depends(get_db)
 
 @router.get("/{project_id}/history", response_model=list[dict])
 async def get_project_history(project_id: int, db: Annotated[Session, Depends(get_db)], current_user: Annotated[User, Depends(get_current_user)]):
-    # Only Admin and Project Manager can view project history
+    # Only Admin, Super Admin and Project Manager can view project history
     user_roles = [r.name for r in current_user.roles]
-    if not any(role in user_roles for role in ["Admin", "Project Manager"]):
+    if not any(role in user_roles for role in ["Super Admin", "Admin", "Project Manager"]):
         raise HTTPException(status_code=403, detail="Not authorized to view project history")
 
     # Verify user has access to the project
-    project = service.get(db, project_id)
+    cid = get_effective_company_id(current_user)
+    project = service.get(db, project_id, company_id=cid)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     has_access = False
-    if "Admin" in user_roles:
+    if "Super Admin" in user_roles or "Admin" in user_roles:
         has_access = True
     elif "Project Manager" in user_roles and project.project_manager_id == current_user.id:
         has_access = True

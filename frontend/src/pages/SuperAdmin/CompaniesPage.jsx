@@ -210,16 +210,11 @@ export default function CompaniesPage() {
                     onClick={() => navigate(`/super-admin/companies/${c.id}`)}
                   >
                     <td className="ps-4 py-3 font-semibold text-slate-800">
-                      <div className="d-flex align-items-center gap-3">
-                        <div className="w-10 h-10 rounded-2 bg-gradient bg-primary-subtle text-primary border border-primary-subtle d-flex align-items-center justify-content-center font-bold fs-6 shrink-0">
-                          {c.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="text-slate-900 font-semibold">{c.name}</div>
-                          {c.legal_name && <div className="text-xs text-muted">{c.legal_name}</div>}
-                          <div className="text-xs text-muted font-normal">
-                            Joined {new Date(c.created_at).toLocaleDateString()}
-                          </div>
+                      <div>
+                        <div className="text-slate-900 font-semibold">{c.name}</div>
+                        {c.legal_name && <div className="text-xs text-muted">{c.legal_name}</div>}
+                        <div className="text-xs text-muted font-normal">
+                          Joined {new Date(c.created_at).toLocaleDateString()}
                         </div>
                       </div>
                     </td>

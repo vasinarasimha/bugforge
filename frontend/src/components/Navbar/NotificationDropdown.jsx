@@ -27,6 +27,8 @@ function getNotificationIcon(type) {
       return { icon: 'bi-person-check-fill', color: '#06b6d4' }
     case 'FEATURE_READY_FOR_QA':
       return { icon: 'bi-patch-check-fill', color: '#f59e0b' }
+    case 'QA_ASSIGNED':
+      return { icon: 'bi-person-badge-fill', color: '#8b5cf6' }
     case 'FEATURE_QA_REWORK':
       return { icon: 'bi-arrow-repeat', color: '#ef4444' }
     case 'FEATURE_CLOSED':
@@ -100,8 +102,22 @@ export default function NotificationDropdown({ isOpen, onClose, onCountChange })
       }
     }
     onClose()
-    if (notif.link_url) {
+
+    const isIssueNotification =
+      notif.entity_type?.toLowerCase() === 'issue' ||
+      notif.notification_type?.toLowerCase().includes('feature') ||
+      notif.notification_type?.toLowerCase().includes('issue')
+    const matchId = notif.link_url?.match(/\/issues\/(\d+)/)?.[1]
+    const targetIssueId = notif.entity_id || (matchId ? Number(matchId) : null)
+
+    if (isIssueNotification && targetIssueId) {
+      navigate(`/issues/${targetIssueId}`, { state: { issueId: Number(targetIssueId) } })
+    } else if (notif.link_url) {
       navigate(notif.link_url)
+    } else if (targetIssueId) {
+      navigate(`/issues/${targetIssueId}`, { state: { issueId: Number(targetIssueId) } })
+    } else {
+      navigate('/issues')
     }
   }
 

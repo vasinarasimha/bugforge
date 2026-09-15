@@ -16,6 +16,7 @@ class TeamRepository:
         pm_id: Optional[int] = None,
         tl_id: Optional[int] = None,
         user_id: Optional[int] = None,
+        company_id: Optional[int] = None,
     ) -> List[Team]:
         stmt = (
             select(Team)
@@ -26,6 +27,9 @@ class TeamRepository:
             )
             .order_by(Team.id.asc())
         )
+
+        if company_id is not None:
+            stmt = stmt.where(Team.company_id == company_id)
 
         if is_active is not None:
             stmt = stmt.where(Team.is_active == is_active)
@@ -50,7 +54,7 @@ class TeamRepository:
 
         return list(db.scalars(stmt).unique().all())
 
-    def get_by_id(self, db: Session, team_id: int) -> Optional[Team]:
+    def get_by_id(self, db: Session, team_id: int, company_id: Optional[int] = None) -> Optional[Team]:
         stmt = (
             select(Team)
             .options(
@@ -60,13 +64,21 @@ class TeamRepository:
             )
             .where(Team.id == team_id)
         )
+        if company_id is not None:
+            stmt = stmt.where(Team.company_id == company_id)
         return db.scalar(stmt)
 
-    def get_by_name(self, db: Session, name: str) -> Optional[Team]:
-        return db.scalar(select(Team).where(func.lower(Team.name) == name.lower().strip()))
+    def get_by_name(self, db: Session, name: str, company_id: Optional[int] = None) -> Optional[Team]:
+        stmt = select(Team).where(func.lower(Team.name) == name.lower().strip())
+        if company_id is not None:
+            stmt = stmt.where(Team.company_id == company_id)
+        return db.scalar(stmt)
 
-    def get_team_by_leader_id(self, db: Session, leader_id: int) -> Optional[Team]:
-        return db.scalar(select(Team).where(Team.team_leader_id == leader_id, Team.is_active == True))
+    def get_team_by_leader_id(self, db: Session, leader_id: int, company_id: Optional[int] = None) -> Optional[Team]:
+        stmt = select(Team).where(Team.team_leader_id == leader_id, Team.is_active == True)
+        if company_id is not None:
+            stmt = stmt.where(Team.company_id == company_id)
+        return db.scalar(stmt)
 
     def create(
         self,
@@ -78,10 +90,11 @@ class TeamRepository:
         db.flush()
 
         if member_ids:
-            # Filter real users only
-            valid_users = db.scalars(
-                select(User).where(User.id.in_(member_ids), User.is_system_user == False, User.is_active == True)
-            ).all()
+            # Filter real users only belonging to this team's company
+            users_stmt = select(User).where(User.id.in_(member_ids), User.is_system_user == False, User.is_active == True)
+            if team.company_id is not None:
+                users_stmt = users_stmt.where(User.company_id == team.company_id)
+            valid_users = db.scalars(users_stmt).all()
             for u in valid_users:
                 db.add(TeamMember(team_id=team.id, user_id=u.id))
 
@@ -100,11 +113,12 @@ class TeamRepository:
                 setattr(team, k, v)
 
         if member_ids is not None:
-            # Replace team members
+            # Replace team members belonging to this team's company
             db.query(TeamMember).filter(TeamMember.team_id == team.id).delete()
-            valid_users = db.scalars(
-                select(User).where(User.id.in_(member_ids), User.is_system_user == False, User.is_active == True)
-            ).all()
+            users_stmt = select(User).where(User.id.in_(member_ids), User.is_system_user == False, User.is_active == True)
+            if team.company_id is not None:
+                users_stmt = users_stmt.where(User.company_id == team.company_id)
+            valid_users = db.scalars(users_stmt).all()
             for u in valid_users:
                 db.add(TeamMember(team_id=team.id, user_id=u.id))
 
@@ -117,19 +131,21 @@ class TeamRepository:
         db.refresh(team)
         return team
 
-    def get_available_team_leaders(self, db: Session, exclude_team_id: Optional[int] = None) -> List[User]:
+    def get_available_team_leaders(self, db: Session, exclude_team_id: Optional[int] = None, company_id: Optional[int] = None) -> List[User]:
         """
         Return users with Team Leader role who are not already assigned as Team Leader to another team.
-        Excludes system users.
+        Excludes system users and filters by company_id if provided.
         """
         # Find team leader user IDs that are currently assigned to other active teams
         query = select(Team.team_leader_id).where(Team.team_leader_id.isnot(None), Team.is_active == True)
+        if company_id is not None:
+            query = query.where(Team.company_id == company_id)
         if exclude_team_id:
             query = query.where(Team.id != exclude_team_id)
         assigned_tl_ids = set(db.scalars(query).all())
 
         # Find all active users with Team Leader role (excluding system users)
-        tl_users = db.scalars(
+        user_query = (
             select(User)
             .join(User.roles)
             .where(
@@ -137,24 +153,28 @@ class TeamRepository:
                 User.is_system_user == False,
                 User.is_active == True
             )
-            .order_by(User.full_name.asc())
-        ).unique().all()
+        )
+        if company_id is not None:
+            user_query = user_query.where(User.company_id == company_id)
+        tl_users = db.scalars(user_query.order_by(User.full_name.asc())).unique().all()
 
         return [u for u in tl_users if u.id not in assigned_tl_ids]
 
-    def get_all_eligible_employees(self, db: Session) -> List[User]:
+    def get_all_eligible_employees(self, db: Session, company_id: Optional[int] = None) -> List[User]:
         """
         Return all real active employees available for team membership.
-        Excludes system users.
+        Excludes system users and filters by company_id if provided.
         """
+        stmt = (
+            select(User)
+            .options(joinedload(User.roles))
+            .where(
+                User.is_system_user == False,
+                User.is_active == True
+            )
+        )
+        if company_id is not None:
+            stmt = stmt.where(User.company_id == company_id)
         return list(
-            db.scalars(
-                select(User)
-                .options(joinedload(User.roles))
-                .where(
-                    User.is_system_user == False,
-                    User.is_active == True
-                )
-                .order_by(User.full_name.asc())
-            ).unique().all()
+            db.scalars(stmt.order_by(User.full_name.asc())).unique().all()
         )

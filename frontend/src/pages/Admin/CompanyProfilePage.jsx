@@ -51,13 +51,16 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
 
   // Customization Request Modal State
   const [showRequestModal, setShowRequestModal] = useState(false)
+  const [trackingRequest, setTrackingRequest] = useState(null)
   const [requestForm, setRequestForm] = useState({
     title: '',
+    request_type: 'Feature',
     category: 'Workflow',
     description: '',
     requested_behavior: '',
   })
   const [submittingRequest, setSubmittingRequest] = useState(false)
+
 
   // Settings Save State
   const [savingSettings, setSavingSettings] = useState(false)
@@ -225,6 +228,7 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
       setShowRequestModal(false)
       setRequestForm({
         title: '',
+        request_type: 'Feature',
         category: 'Workflow',
         description: '',
         requested_behavior: '',
@@ -743,41 +747,63 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
                   <table className="table table-hover align-middle mb-0 text-xs">
                     <thead className="table-light text-muted text-uppercase">
                       <tr>
-                        <th className="ps-4 py-3">Title & Summary</th>
-                        <th className="py-3">Category</th>
-                        <th className="py-3">Status</th>
-                        <th className="py-3">Super Admin Response</th>
-                        <th className="py-3 text-end pe-4">Submitted</th>
+                        <th className="ps-4 py-3">Title & Context</th>
+                        <th className="py-3">Type & Category</th>
+                        <th className="py-3">Implementation / Defect Status</th>
+                        <th className="py-3">BugForge Platform Response</th>
+                        <th className="py-3">Submitted</th>
+                        <th className="py-3 text-end pe-4">Progress</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {requests.map((r) => (
-                        <tr key={r.id}>
-                          <td className="ps-4 py-3">
-                            <div className="font-semibold text-slate-900 text-sm">{r.title}</div>
-                            <div className="text-muted mt-0.5">{r.description}</div>
-                          </td>
-                          <td className="py-3">
-                            <CategoryBadge category={r.category} />
-                          </td>
-                          <td className="py-3">
-                            <StatusBadge status={r.status} />
-                          </td>
-                          <td className="py-3" style={{ maxWidth: '300px' }}>
-                            {r.super_admin_notes ? (
-                              <div className="p-2 bg-light border rounded text-slate-800">
-                                <i className="bi bi-chat-quote-fill text-primary me-1" />
-                                {r.super_admin_notes}
+                      {requests.map((r) => {
+                        const isDefect = r.request_type === 'Defect'
+                        const displayStatus = r.implementation_status || r.status
+                        return (
+                          <tr key={r.id}>
+                            <td className="ps-4 py-3">
+                              <div className="font-semibold text-slate-900 text-sm">{r.title}</div>
+                              <div className="text-muted mt-0.5" style={{ maxWidth: '380px' }}>{r.description}</div>
+                            </td>
+                            <td className="py-3">
+                              <div className="d-flex align-items-center gap-1.5 flex-wrap">
+                                <span className={`badge px-2 py-0.5 rounded-pill ${isDefect ? 'bg-danger-subtle text-danger border border-danger-subtle' : 'bg-primary-subtle text-primary border border-primary-subtle'}`}>
+                                  <i className={`bi ${isDefect ? 'bi-bug' : 'bi-stars'} me-1`} />
+                                  {isDefect ? 'Client Defect' : 'Client Feature'}
+                                </span>
+                                <CategoryBadge category={r.category} />
                               </div>
-                            ) : (
-                              <span className="text-muted italic">Awaiting review</span>
-                            )}
-                          </td>
-                          <td className="py-3 text-end pe-4 text-muted">
-                            {new Date(r.created_at).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="py-3">
+                              <StatusBadge status={displayStatus} />
+                            </td>
+                            <td className="py-3" style={{ maxWidth: '280px' }}>
+                              {r.super_admin_notes ? (
+                                <div className="p-2 bg-light border rounded text-slate-800">
+                                  <i className="bi bi-chat-quote-fill text-primary me-1" />
+                                  {r.super_admin_notes}
+                                </div>
+                              ) : (
+                                <span className="text-muted italic">Awaiting platform review</span>
+                              )}
+                            </td>
+                            <td className="py-3 text-muted">
+                              {new Date(r.created_at).toLocaleDateString()}
+                            </td>
+                            <td className="py-3 text-end pe-4">
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm py-1 px-2.5 d-inline-flex align-items-center gap-1 shadow-sm"
+                                style={{ fontSize: '0.75rem' }}
+                                onClick={() => setTrackingRequest(r)}
+                              >
+                                <i className="bi bi-activity" />
+                                <span>Track Status</span>
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -810,7 +836,7 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
                           <td className="py-2 font-semibold">
                             <AuditActionBadge action={log.action} showIcon />
                           </td>
-                          <td className="py-2 text-muted">{log.entity_type} {log.entity_id ? `(#${log.entity_id})` : ''}</td>
+                          <td className="py-2 text-muted">{log.entity_type}</td>
                           <td className="py-2 font-medium">{log.user_name || 'Admin'}</td>
                         </tr>
                       ))}
@@ -820,6 +846,7 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
               )}
             </div>
           )}
+
         </div>
       </div>
 
@@ -970,7 +997,7 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
                   </div>
 
                   <div className="row g-3 mb-3">
-                    <div className="col-12 col-sm-8">
+                    <div className="col-12 col-sm-6">
                       <label className="form-label text-xs font-semibold text-slate-700">
                         Proposal Title <span className="text-danger">*</span>
                       </label>
@@ -983,7 +1010,18 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
                         onChange={(e) => setRequestForm({ ...requestForm, title: e.target.value })}
                       />
                     </div>
-                    <div className="col-12 col-sm-4">
+                    <div className="col-12 col-sm-3">
+                      <label className="form-label text-xs font-semibold text-slate-700">Request Type</label>
+                      <select
+                        className="form-select form-select-sm"
+                        value={requestForm.request_type || 'Feature'}
+                        onChange={(e) => setRequestForm({ ...requestForm, request_type: e.target.value })}
+                      >
+                        <option value="Feature">Client Feature</option>
+                        <option value="Defect">Client Defect / Issue</option>
+                      </select>
+                    </div>
+                    <div className="col-12 col-sm-3">
                       <label className="form-label text-xs font-semibold text-slate-700">Category</label>
                       <select
                         className="form-select form-select-sm"
@@ -997,6 +1035,13 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
                         <option value="AI Intelligence">AI Intelligence</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div className="p-2.5 mb-3 bg-light border rounded text-xs text-muted d-flex align-items-center gap-2">
+                    <i className="bi bi-shield-check text-primary fs-6" />
+                    <span>
+                      This requirement will be assigned by default to the <strong>BugForge</strong> project and executed by the internal platform team. You will be able to follow the live implementation / resolution status here.
+                    </span>
                   </div>
 
                   <div className="mb-3">
@@ -1033,7 +1078,7 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
                     Cancel
                   </button>
                   <button type="submit" className="btn btn-sm btn-primary px-3 shadow-sm" disabled={submittingRequest}>
-                    {submittingRequest ? 'Submitting...' : 'Submit Proposal'}
+                    {submittingRequest ? 'Submitting...' : 'Submit Request'}
                   </button>
                 </div>
               </form>
@@ -1041,6 +1086,126 @@ export default function CompanyProfilePage({ initialTab: propTab }) {
           </div>
         </div>
       )}
+
+      {/* Progress Tracking Modal */}
+      {trackingRequest && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }} tabIndex="-1">
+          <div className="modal-dialog modal-dialog-centered modal-lg">
+            <div className="modal-content border-0 shadow-lg rounded-3">
+              <div className="modal-header border-bottom py-3 px-4 d-flex align-items-center justify-content-between">
+                <div className="d-flex align-items-center gap-2">
+                  <span className={`badge px-2 py-1 rounded-pill ${trackingRequest.request_type === 'Defect' ? 'bg-danger text-white' : 'bg-primary text-white'}`}>
+                    {trackingRequest.request_type === 'Defect' ? 'Client Defect' : 'Client Feature'}
+                  </span>
+                  <h2 className="modal-title h6 font-bold text-slate-900 mb-0">
+                    Live Progress & Implementation Status
+                  </h2>
+                </div>
+                <button type="button" className="btn-close" onClick={() => setTrackingRequest(null)} aria-label="Close" />
+              </div>
+              <div className="modal-body p-4">
+                <div className="p-3 bg-light rounded-3 mb-4 border">
+                  <h3 className="h6 font-bold text-slate-900 mb-1">{trackingRequest.title}</h3>
+                  <p className="text-xs text-muted mb-2">{trackingRequest.description}</p>
+                  <div className="d-flex align-items-center gap-2 flex-wrap text-xs">
+                    <span className="badge bg-secondary-subtle text-secondary border">Category: {trackingRequest.category}</span>
+                    <span className="badge bg-indigo-subtle text-indigo border" style={{ backgroundColor: '#e0e7ff', color: '#3730a3' }}>
+                      <i className="bi bi-diagram-3-fill me-1" />BugForge Engineering Project
+                    </span>
+                    <span className="text-muted ms-auto">Submitted: {new Date(trackingRequest.created_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+
+                {/* Progress Stepper */}
+                <div className="mb-4">
+                  <h4 className="text-xs font-semibold text-slate-500 text-uppercase tracking-wider mb-3">
+                    {trackingRequest.request_type === 'Defect' ? 'Defect Resolution Pipeline' : 'Feature Implementation Pipeline'}
+                  </h4>
+                  {(() => {
+                    const statusVal = (trackingRequest.implementation_status || trackingRequest.status || '').toLowerCase()
+                    const isClosedOrResolved = statusVal.includes('resolved') || statusVal.includes('implemented') || statusVal.includes('closed')
+                    const isQA = statusVal.includes('qa') || statusVal.includes('verify') || statusVal.includes('testing')
+                    const isInProgress = statusVal.includes('progress') || statusVal.includes('development') || isQA || isClosedOrResolved
+                    const isReviewed = trackingRequest.status !== 'Pending' || isInProgress || isClosedOrResolved
+
+                    const steps = [
+                      { label: 'Submitted', done: true, icon: 'bi-send-check' },
+                      { label: 'Platform Review', done: isReviewed, icon: 'bi-search' },
+                      { label: trackingRequest.request_type === 'Defect' ? 'Fixing Defect' : 'Engineering', done: isInProgress, icon: 'bi-code-slash' },
+                      { label: 'QA Verification', done: isQA || isClosedOrResolved, icon: 'bi-shield-check' },
+                      { label: trackingRequest.request_type === 'Defect' ? 'Defect Resolved' : 'Implemented', done: isClosedOrResolved, icon: 'bi-check-circle-fill' },
+                    ]
+
+                    return (
+                      <div className="d-flex justify-content-between align-items-center position-relative px-2">
+                        <div className="position-absolute start-0 end-0 top-50 translate-middle-y bg-slate-200" style={{ height: '3px', zIndex: 0 }} />
+                        {steps.map((step, idx) => (
+                          <div key={idx} className="d-flex flex-column align-items-center position-relative" style={{ zIndex: 1, minWidth: '80px' }}>
+                            <div
+                              className={`rounded-circle d-flex align-items-center justify-content-center shadow-sm ${step.done ? 'bg-primary text-white' : 'bg-white text-slate-400 border'}`}
+                              style={{ width: '38px', height: '38px', fontSize: '1rem', transition: 'all 0.2s' }}
+                            >
+                              <i className={`bi ${step.icon}`} />
+                            </div>
+                            <span className={`text-xs mt-1.5 font-semibold text-center ${step.done ? 'text-primary' : 'text-muted'}`}>
+                              {step.label}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                </div>
+
+                {/* Current Status Box */}
+                <div className="alert alert-primary d-flex align-items-center justify-content-between p-3 mb-3 border-0 bg-primary-subtle text-primary-emphasis">
+                  <div>
+                    <div className="text-xs text-muted mb-0.5">Current Live Status</div>
+                    <div className="font-bold fs-6">
+                      <StatusBadge status={trackingRequest.implementation_status || trackingRequest.status} />
+                    </div>
+                  </div>
+                  <div className="text-end text-xs text-muted">
+                    Managed by BugForge Core Team
+                  </div>
+                </div>
+
+                {/* Super Admin Response / Engineering Notes */}
+                {trackingRequest.super_admin_notes ? (
+                  <div className="p-3 bg-light border rounded-3 text-xs mb-3">
+                    <div className="font-bold text-slate-900 mb-1 d-flex align-items-center gap-1.5">
+                      <i className="bi bi-chat-left-text-fill text-primary" />
+                      <span>BugForge Platform Reviewer Notes:</span>
+                    </div>
+                    <p className="text-slate-700 mb-0">{trackingRequest.super_admin_notes}</p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-light border rounded-3 text-xs text-muted text-center mb-3">
+                    <i className="bi bi-hourglass-split me-1" />
+                    Our engineering team is assessing this request. Official updates will appear here.
+                  </div>
+                )}
+
+                {trackingRequest.resolution && (
+                  <div className="p-3 bg-success-subtle border border-success-subtle rounded-3 text-xs mb-3">
+                    <div className="font-bold text-success-emphasis mb-1 d-flex align-items-center gap-1.5">
+                      <i className="bi bi-check2-circle" />
+                      <span>Resolution Summary:</span>
+                    </div>
+                    <p className="text-success-emphasis mb-0">{trackingRequest.resolution}</p>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer border-top py-2.5 px-4">
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setTrackingRequest(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

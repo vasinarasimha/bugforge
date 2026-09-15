@@ -5,6 +5,7 @@ import {
   deleteSprint, assignIssueToSprint, removeIssueFromSprint
 } from '../../services/sprintService'
 import { getIssues } from '../../services/issueService'
+import SearchableSelect from '../../components/common/SearchableSelect'
 
 const STATUS_STYLE = {
   Planning:  { bg: 'rgba(99,102,241,0.10)', color: '#6366f1', dot: '#6366f1' },
@@ -130,19 +131,24 @@ function SprintFormModal({ onClose, onSave, statuses, projects, initial }) {
             {!initial && (
               <div className="mb-3">
                 <label className="form-label fw-bold">Project</label>
-                <select required className="form-select" value={form.project_id} onChange={e => set('project_id', e.target.value)}>
-                  <option value="">Select Project</option>
-                  {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                <SearchableSelect
+                  placeholder="Select Project"
+                  options={projects.map(p => ({ value: p.id, label: p.name }))}
+                  value={form.project_id}
+                  isClearable={false}
+                  onChange={val => set('project_id', val)}
+                />
               </div>
             )}
             <div className="mb-3">
               <label className="form-label fw-bold">Status</label>
-              <select required className="form-select" value={form.status_id} onChange={e => set('status_id', e.target.value)}>
-                <option value="">Select Status</option>
-                {statuses.map(s => console.log(s.id, s.name))}
-                {statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              <SearchableSelect
+                placeholder="Select Status"
+                options={statuses.map(s => ({ value: s.id, label: s.name }))}
+                value={form.status_id}
+                isClearable={false}
+                onChange={val => set('status_id', val)}
+              />
             </div>
             <div className="row mb-3">
               <div className="col">
@@ -253,11 +259,16 @@ export default function SprintPlanningPage() {
           <h2 className="mb-1">Sprint Planning</h2>
           <p className="text-muted mb-0">Plan and manage your project iterations.</p>
         </div>
-        <div className="d-flex gap-3">
-          <select className="form-select border-secondary" value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
-            <option value="">All Projects</option>
-            {allProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+        <div className="d-flex gap-3 align-items-center">
+          <div style={{ minWidth: '220px' }}>
+            <SearchableSelect
+              placeholder="All Projects"
+              isClearable
+              options={allProjects.map(p => ({ value: p.id, label: p.name }))}
+              value={projectFilter ? Number(projectFilter) : null}
+              onChange={val => setProjectFilter(val ? String(val) : '')}
+            />
+          </div>
           <button className="btn btn-primary text-nowrap" onClick={() => { setEditTarget(null); setShowModal(true) }}>
             <i className="bi bi-plus-lg me-1"></i> New Sprint
           </button>
@@ -308,9 +319,13 @@ export default function SprintPlanningPage() {
               {sprints.length > 0 && (
                 <div className="mb-3 p-2 bg-light rounded border">
                   <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>Assign selected to:</label>
-                  <select className="form-select form-select-sm" value={activeSprintId} onChange={e => setActiveSprintId(Number(e.target.value))}>
-                    {sprints.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    placeholder="Select Sprint..."
+                    isClearable={false}
+                    options={sprints.map(s => ({ value: s.id, label: s.name }))}
+                    value={activeSprintId}
+                    onChange={val => setActiveSprintId(val ? Number(val) : null)}
+                  />
                 </div>
               )}
               <div style={{ maxHeight: '600px', overflowY: 'auto' }} className="pe-2 custom-scrollbar">

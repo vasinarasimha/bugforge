@@ -21,6 +21,7 @@ from app.models.role import Role, Permission, role_permissions
 from app.models.team import Team
 from app.models.company import Company, CompanySettings
 from app.models.user import User
+from app.models.project_history import ProjectHistory  # noqa: F401
 
 
 def init_db() -> None:

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_current_user, get_effective_company_id
 from app.core.database import get_db
 from app.core.security import create_access_token
 from app.models.user import User
@@ -53,7 +53,10 @@ def get_users(
     limit: int = 100,
     offset: int = 0,
 ):
-    stmt = select(User).where(User.is_active == True)
+    cid = get_effective_company_id(current_user)
+    stmt = select(User).where(User.is_active == True, User.is_system_user == False)
+    if cid is not None:
+        stmt = stmt.where(User.company_id == cid)
     if search:
         stmt = stmt.where(User.full_name.ilike(f"%{search}%"))
     stmt = stmt.limit(limit).offset(offset)

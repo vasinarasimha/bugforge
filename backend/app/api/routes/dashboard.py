@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func, case
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_current_user, get_effective_company_id
 from app.api.routes.issues import serialize as issue_serialize
 from app.api.routes.projects import serialize as project_serialize
 from app.core.database import get_db
@@ -26,25 +26,35 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
 @router.get("/statistics", response_model=DashboardStatistics)
-async def statistics(db: Annotated[Session, Depends(get_db)], _: Annotated[User, Depends(get_current_user)]):
+async def statistics(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)]
+):
     from app.models.project import Project
+    cid = get_effective_company_id(current_user)
 
     # SQL-level aggregation instead of loading all records into memory
-    total_projects = db.query(func.count(Project.id)).filter(Project.is_active == True).scalar() or 0
+    proj_q = db.query(func.count(Project.id)).filter(Project.is_active == True)
+    if cid is not None:
+        proj_q = proj_q.filter(Project.company_id == cid)
+    total_projects = proj_q.scalar() or 0
 
-    issue_stats = db.query(
+    issue_q = db.query(
         func.count(Issue.id).label("total"),
         func.count(case((IssueStatus.name == "In Progress", Issue.id))).label("in_progress"),
         func.count(case((IssueStatus.name == "Resolved", Issue.id))).label("resolved"),
-    ).join(Issue.status).filter(Issue.is_deleted == False, Issue.is_active == True).first()
+    ).join(Issue.status).filter(Issue.is_deleted == False, Issue.is_active == True)
+    if cid is not None:
+        issue_q = issue_q.filter((Issue.company_id == cid) | (Issue.requesting_company_id == cid))
+    issue_stats = issue_q.first()
 
     total_issues = issue_stats.total if issue_stats else 0
     in_progress = issue_stats.in_progress if issue_stats else 0
     resolved = issue_stats.resolved if issue_stats else 0
 
     # Only fetch the few records needed for display
-    projects = ProjectService().list(db, limit=5, offset=0)
-    recent_issues = IssueService().list(db)[:3]
+    projects = ProjectService().list(db, limit=5, offset=0, company_id=cid)
+    recent_issues = IssueService().list(db, company_id=cid)[:3]
 
     return {
         "total_projects": total_projects,
@@ -66,9 +76,10 @@ async def pm_stats(
     if "Project Manager" not in user_roles:
         raise HTTPException(status_code=403, detail="Project Manager role required")
 
-    pm_projects = ProjectService().list_by_manager(db, current_user.id)
+    cid = get_effective_company_id(current_user)
+    pm_projects = ProjectService().list_by_manager(db, current_user.id, company_id=cid)
     pm_project_ids = [p.id for p in pm_projects]
-    pm_issues = IssueService().list(db, project_ids=pm_project_ids)
+    pm_issues = IssueService().list(db, project_ids=pm_project_ids, company_id=cid) if pm_project_ids else []
 
     active_projects = sum(1 for p in pm_projects if p.status == "Active")
     open_issues = sum(1 for i in pm_issues if i.status and i.status.name == "Open")
@@ -88,21 +99,25 @@ async def pm_stats(
         issues_by_type[i.issue_type or "Defect"] += 1
 
     # Sprints and completion rate for PM
-    pm_active_sprints = db.query(Sprint).options(
-        joinedload(Sprint.issues).joinedload(Issue.status)
-    ).join(Sprint.status).filter(
-        SprintStatus.name == "Active"
-    ).all()
     if pm_project_ids:
-        pm_proj_sprints = [s for s in pm_active_sprints if s.project_id in pm_project_ids]
-        if pm_proj_sprints:
-            pm_active_sprints = pm_proj_sprints
+        pm_active_sprints = db.query(Sprint).options(
+            joinedload(Sprint.issues).joinedload(Issue.status)
+        ).join(Sprint.status).filter(
+            SprintStatus.name == "Active",
+            Sprint.project_id.in_(pm_project_ids)
+        ).all()
+    else:
+        pm_active_sprints = []
 
     total_sprint_issues = sum(len([i for i in s.issues if not i.is_deleted and i.is_active]) for s in pm_active_sprints)
     resolved_sprint_issues = sum(sum(1 for i in s.issues if not i.is_deleted and i.is_active and i.status and i.status.name in ("Resolved", "Closed")) for s in pm_active_sprints)
     sprint_completion_rate = round((resolved_sprint_issues / total_sprint_issues * 100)) if total_sprint_issues > 0 else 0
 
-    recent_history_records = db.query(IssueHistory).join(Issue).filter(Issue.project_id.in_(pm_project_ids)).order_by(IssueHistory.created_at.desc()).limit(8).all()
+    recent_history_records = []
+    if pm_project_ids:
+        recent_history_records = db.query(IssueHistory).join(Issue).filter(
+            Issue.project_id.in_(pm_project_ids)
+        ).order_by(IssueHistory.created_at.desc()).limit(8).all()
     recent_history_serialized = [{"id": h.id, "field_name": h.field_name, "old_value": h.old_value, "new_value": h.new_value, "created_at": h.created_at.isoformat()} for h in recent_history_records]
 
     return {
@@ -135,9 +150,10 @@ async def tl_stats(
     if "Team Leader" not in user_roles:
         raise HTTPException(status_code=403, detail="Team Leader role required")
 
-    tl_projects = ProjectService().list_by_leader(db, current_user.id)
+    cid = get_effective_company_id(current_user)
+    tl_projects = ProjectService().list_by_leader(db, current_user.id, company_id=cid)
     tl_project_ids = [p.id for p in tl_projects]
-    tl_issues = IssueService().list(db, project_ids=tl_project_ids)
+    tl_issues = IssueService().list(db, project_ids=tl_project_ids, company_id=cid) if tl_project_ids else []
 
     active_projects = sum(1 for p in tl_projects if p.status == "Active")
     open_issues = sum(1 for i in tl_issues if i.status and i.status.name == "Open")
@@ -157,26 +173,35 @@ async def tl_stats(
         issues_by_type[i.issue_type or "Defect"] += 1
 
     # 1. Team Leader's Team and Workload
-    tl_team = db.query(Team).options(
+    tl_team_q = db.query(Team).options(
         joinedload(Team.members).joinedload(TeamMember.user)
-    ).filter(Team.team_leader_id == current_user.id, Team.is_active == True).first()
+    ).filter(Team.team_leader_id == current_user.id, Team.is_active == True)
+    if cid is not None:
+        tl_team_q = tl_team_q.filter(Team.company_id == cid)
+    tl_team = tl_team_q.first()
 
     team_members_list = []
     if tl_team and tl_team.members:
         team_members_list = [m.user for m in tl_team.members if m.user and not m.user.is_system_user]
     else:
-        # Fallback to active developers
-        team_members_list = db.query(User).join(User.roles).filter(
+        # Fallback to active developers in current company
+        dev_q = db.query(User).join(User.roles).filter(
             Role.name == "Developer",
             User.is_active == True,
             User.is_system_user == False
-        ).all()
+        )
+        if cid is not None:
+            dev_q = dev_q.filter(User.company_id == cid)
+        team_members_list = dev_q.all()
 
     assigned_user_ids = {i.assigned_to for i in tl_issues if i.assigned_to is not None}
     all_workload_users = {u.id: u for u in team_members_list if u}
     for uid in assigned_user_ids:
         if uid not in all_workload_users:
-            u_obj = db.query(User).filter(User.id == uid, User.is_system_user == False).first()
+            u_obj_q = db.query(User).filter(User.id == uid, User.is_system_user == False)
+            if cid is not None:
+                u_obj_q = u_obj_q.filter(User.company_id == cid)
+            u_obj = u_obj_q.first()
             if u_obj:
                 all_workload_users[uid] = u_obj
 
@@ -199,24 +224,17 @@ async def tl_stats(
 
     team_workload.sort(key=lambda x: x["total"], reverse=True)
 
-    # 2. Active Sprints
-    active_sprints_query = db.query(Sprint).options(
-        joinedload(Sprint.status),
-        joinedload(Sprint.issues).joinedload(Issue.status)
-    ).join(Sprint.status).filter(
-        SprintStatus.name == "Active"
-    )
+    # 2. Active Sprints (scoped to TL's projects only, no cross-company fallback)
     if tl_project_ids:
-        active_sprints_query = active_sprints_query.filter(Sprint.project_id.in_(tl_project_ids))
-
-    active_sprints_records = active_sprints_query.all()
-    if not active_sprints_records:
         active_sprints_records = db.query(Sprint).options(
             joinedload(Sprint.status),
             joinedload(Sprint.issues).joinedload(Issue.status)
         ).join(Sprint.status).filter(
-            SprintStatus.name == "Active"
+            SprintStatus.name == "Active",
+            Sprint.project_id.in_(tl_project_ids)
         ).all()
+    else:
+        active_sprints_records = []
 
     today_date = datetime.now(timezone.utc).date()
     active_sprints_list = []
@@ -239,7 +257,11 @@ async def tl_stats(
             "total_issues": sp_total
         })
 
-    recent_history_records = db.query(IssueHistory).join(Issue).filter(Issue.project_id.in_(tl_project_ids)).order_by(IssueHistory.created_at.desc()).limit(8).all()
+    recent_history_records = []
+    if tl_project_ids:
+        recent_history_records = db.query(IssueHistory).join(Issue).filter(
+            Issue.project_id.in_(tl_project_ids)
+        ).order_by(IssueHistory.created_at.desc()).limit(8).all()
     recent_history_serialized = [{"id": h.id, "field_name": h.field_name, "old_value": h.old_value, "new_value": h.new_value, "created_at": h.created_at.isoformat()} for h in recent_history_records]
 
     return {
@@ -265,13 +287,14 @@ async def admin_stats(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    """Admin stats — full system-wide stats."""
+    """Admin stats — scoped to user's company for Company Admin, global for Super Admin."""
     user_roles = [r.name for r in current_user.roles]
-    if "Admin" not in user_roles:
+    if "Admin" not in user_roles and "Super Admin" not in user_roles:
         raise HTTPException(status_code=403, detail="Admin role required")
 
-    all_projects = ProjectService().list(db)
-    all_issues = IssueService().list(db)
+    cid = get_effective_company_id(current_user)
+    all_projects = ProjectService().list(db, company_id=cid)
+    all_issues = IssueService().list(db, company_id=cid)
 
     active_projects = sum(1 for p in all_projects if p.status == "Active")
     open_issues = sum(1 for i in all_issues if i.status and i.status.name == "Open")
@@ -286,9 +309,9 @@ async def admin_stats(
     for i in all_issues:
         issues_by_status[i.status.name if i.status else "Unknown"] += 1
 
-    # User stats by role (excluding system test accounts)
+    # User stats by role (excluding system test accounts, scoped to company)
     user_repo = UserRepository()
-    all_users = user_repo.list(db)
+    all_users = user_repo.list(db, company_id=cid)
     total_users = len(all_users)
     users_by_role = defaultdict(int)
     for user in all_users:
@@ -324,7 +347,8 @@ async def dev_stats(
     if "Developer" not in user_roles:
         raise HTTPException(status_code=403, detail="Developer role required")
 
-    dev_issues = IssueService().list(db)
+    cid = get_effective_company_id(current_user)
+    dev_issues = IssueService().list(db, company_id=cid)
     dev_issues = [i for i in dev_issues if i.assigned_to == current_user.id]
 
     open_issues = sum(1 for i in dev_issues if i.status and i.status.name == "Open")
@@ -343,7 +367,12 @@ async def dev_stats(
     for i in dev_issues:
         issues_by_type[i.issue_type or "Defect"] += 1
 
-    recent_history_records = db.query(IssueHistory).join(Issue).filter(Issue.assigned_to == current_user.id).order_by(IssueHistory.created_at.desc()).limit(8).all()
+    recent_history_q = db.query(IssueHistory).join(Issue).filter(Issue.assigned_to == current_user.id)
+    if cid is not None:
+        recent_history_q = recent_history_q.filter(
+            (Issue.company_id == cid) | (Issue.requesting_company_id == cid)
+        )
+    recent_history_records = recent_history_q.order_by(IssueHistory.created_at.desc()).limit(8).all()
     recent_history_serialized = [{"id": h.id, "field_name": h.field_name, "old_value": h.old_value, "new_value": h.new_value, "created_at": h.created_at.isoformat()} for h in recent_history_records]
 
     return {
@@ -364,12 +393,13 @@ async def qa_stats(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    """QA stats — all issues, categorized by severity/status."""
+    """QA stats — all issues in current company, categorized by severity/status."""
     user_roles = [r.name for r in current_user.roles]
     if "QA" not in user_roles:
         raise HTTPException(status_code=403, detail="QA role required")
 
-    all_issues = IssueService().list(db)
+    cid = get_effective_company_id(current_user)
+    all_issues = IssueService().list(db, company_id=cid)
 
     issues_by_severity = defaultdict(int)
     for i in all_issues:
@@ -402,12 +432,13 @@ async def reporter_stats(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    """Reporter stats — current user's own reported issues only."""
+    """Reporter stats — current user's own reported issues only, within their company."""
     user_roles = [r.name for r in current_user.roles]
     if "Reporter" not in user_roles:
         raise HTTPException(status_code=403, detail="Reporter role required")
 
-    reporter_issues = IssueService().list(db, reporter_id=current_user.id)
+    cid = get_effective_company_id(current_user)
+    reporter_issues = IssueService().list(db, reporter_id=current_user.id, company_id=cid)
 
     open_issues = sum(1 for i in reporter_issues if i.status and i.status.name == "Open")
     in_progress_issues = sum(1 for i in reporter_issues if i.status and i.status.name == "In Progress")

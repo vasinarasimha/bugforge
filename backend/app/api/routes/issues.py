@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import logging
 from typing import Annotated
 
@@ -5,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, Fil
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_current_user, get_effective_company_id, is_super_admin
 from app.core.database import get_db
 from app.models.user import User
 from app.models.issue import Issue, IssueStatus, IssuePriority, IssueSeverity, IssueCategory, IssueModule
@@ -15,7 +16,7 @@ from app.schemas.issue import (
     IssueCategoryResponse, IssueModuleResponse,
     IssueCommentCreate, IssueCommentResponse, IssueHistoryResponse,
     SimilarIssueResponse, IssueCreateResponse, SemanticSearchRequest, SemanticSearchResponse,
-    IssueAssignTeamRequest, IssueQAVerifyRequest, FeatureRequestSubmit,
+    IssueAssignTeamRequest, IssueAssignQAUpdate, IssueQAVerifyRequest, FeatureRequestSubmit,
 )
 from app.schemas.attachment import IssueAttachmentResponse
 from app.services.issue_service import IssueService
@@ -28,10 +29,10 @@ service = IssueService()
 def serialize(i, current_user=None):
     user_company = getattr(current_user, 'company_id', None) if current_user else None
     user_roles = [r.name for r in getattr(current_user, 'roles', [])] if current_user else []
-    is_super_admin = "Super Admin" in user_roles
+    is_super_admin_flag = "Super Admin" in user_roles
 
     hide_internal_details = (
-        not is_super_admin
+        not is_super_admin_flag
         and user_company is not None
         and getattr(i, 'requesting_company_id', None) == user_company
         and i.company_id != user_company
@@ -39,6 +40,43 @@ def serialize(i, current_user=None):
 
     assigned_to = None if hide_internal_details else i.assigned_to
     assignee_name = ("BugForge Engineering Team" if i.assigned_to else None) if hide_internal_details else (i.assignee.full_name if getattr(i, 'assignee', None) else None)
+
+    assigned_qa_id = None if hide_internal_details else getattr(i, 'assigned_qa_id', None)
+    assigned_qa_name = ("BugForge QA Team" if getattr(i, 'assigned_qa_id', None) else None) if hide_internal_details else (i.assigned_qa.full_name if getattr(i, 'assigned_qa', None) else None)
+
+    now_utc = datetime.now(timezone.utc)
+    c_time = i.created_at if (getattr(i, 'created_at', None) and i.created_at.tzinfo) else (
+        i.created_at.replace(tzinfo=timezone.utc) if getattr(i, 'created_at', None) else now_utc
+    )
+    # 24-hour unassigned rule:
+    # age > 24 hours AND developer is not assigned (assigned_to is None)
+    # Team assignment alone does not count as developer assignment
+    is_unassigned_over_24h = (i.assigned_to is None) and ((now_utc - c_time).total_seconds() > 24 * 3600)
+
+    # 1-hour QA unassigned rule:
+    # If QA is not assigned for 1 hour after developer fix (status is Resolved or developer_fixed_at is set)
+    status_name = i.status.name if getattr(i, 'status', None) else ""
+    is_status_resolved = (
+        status_name == "Resolved"
+        or (getattr(i, 'status', None) and getattr(i.status, 'category', '') == "resolved" and status_name not in ("Closed", "Verified"))
+    )
+
+    dev_fix_time = getattr(i, 'developer_fixed_at', None)
+    if dev_fix_time is None and is_status_resolved:
+        dev_fix_time = getattr(i, 'updated_at', None)
+
+    dev_fix_time_utc = (
+        dev_fix_time if (dev_fix_time and dev_fix_time.tzinfo) else (
+            dev_fix_time.replace(tzinfo=timezone.utc) if dev_fix_time else None
+        )
+    )
+
+    is_qa_unassigned_over_1h = (
+        is_status_resolved
+        and (getattr(i, 'assigned_qa_id', None) is None)
+        and (dev_fix_time_utc is not None)
+        and ((now_utc - dev_fix_time_utc).total_seconds() > 3600)
+    )
 
     return {
         "id": i.id,
@@ -71,6 +109,8 @@ def serialize(i, current_user=None):
         "reporter_name": i.reporter.full_name if getattr(i, 'reporter', None) else "",
         "assigned_to": assigned_to,
         "assignee": assignee_name,
+        "assigned_qa_id": assigned_qa_id,
+        "assigned_qa_name": assigned_qa_name,
         "company_id": i.company_id,
         "requesting_company_id": getattr(i, 'requesting_company_id', None),
         "requesting_company_name": i.requesting_company.name if getattr(i, 'requesting_company', None) else None,
@@ -81,9 +121,14 @@ def serialize(i, current_user=None):
         "qa_verified_by_name": ("BugForge QA Team" if getattr(i, 'qa_verified_by_id', None) else None) if hide_internal_details else (i.qa_verified_by.full_name if getattr(i, 'qa_verified_by', None) else None),
         "qa_verified_at": getattr(i, 'qa_verified_at', None),
         "ai_root_cause_session_id": getattr(i, 'ai_root_cause_session_id', None),
+        "developer_fixed_at": getattr(i, 'developer_fixed_at', None),
         "created_at": i.created_at,
         "updated_at": i.updated_at,
-        "is_active": i.is_active
+        "is_active": i.is_active,
+        "is_unassigned_over_24h": is_unassigned_over_24h,
+        "isUnassignedOver24Hours": is_unassigned_over_24h,
+        "is_qa_unassigned_over_1h": is_qa_unassigned_over_1h,
+        "isQaUnassignedOver1Hour": is_qa_unassigned_over_1h,
     }
 
 @router.get("/statuses", response_model=list[IssueStatusResponse])
@@ -91,23 +136,50 @@ async def list_statuses(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    if current_user.company_id:
-        company_statuses = db.query(IssueStatus).filter(
-            IssueStatus.company_id == current_user.company_id,
-            IssueStatus.is_active == True
-        ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
-        if company_statuses:
-            return company_statuses
+    cid = current_user.company_id or 1
+
+    # First attempt: Company-specific statuses
+    company_statuses = db.query(IssueStatus).filter(
+        IssueStatus.company_id == cid,
+        IssueStatus.is_active == True
+    ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+    if company_statuses:
+        seen = set()
+        deduped = []
+        for s in company_statuses:
+            key = (s.name or "").strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(s)
+        return deduped
+
+    # Second attempt: Global default statuses
     global_statuses = db.query(IssueStatus).filter(
         IssueStatus.is_active == True,
         IssueStatus.company_id == None
     ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
     if global_statuses:
-        return global_statuses
-    return db.query(IssueStatus).filter(
-        IssueStatus.is_active == True,
-        IssueStatus.company_id == 1
+        seen = set()
+        deduped = []
+        for s in global_statuses:
+            key = (s.name or "").strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(s)
+        return deduped
+
+    # Fallback for super admin or unexpected unassigned users: all active statuses deduplicated by name
+    all_statuses = db.query(IssueStatus).filter(
+        IssueStatus.is_active == True
     ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+    seen = set()
+    deduped = []
+    for s in all_statuses:
+        key = (s.name or "").strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(s)
+    return deduped
 
 @router.get("/priorities", response_model=list[IssuePriorityResponse])
 async def list_priorities(db: Annotated[Session, Depends(get_db)]):
@@ -123,8 +195,9 @@ async def list_categories(
     current_user: Annotated[User, Depends(get_current_user)]
 ):
     query = db.query(IssueCategory).filter(IssueCategory.is_active == True)
-    if current_user.company_id:
-        query = query.filter((IssueCategory.company_id == current_user.company_id) | (IssueCategory.company_id == None))
+    cid = get_effective_company_id(current_user)
+    if cid is not None:
+        query = query.filter((IssueCategory.company_id == cid) | (IssueCategory.company_id == None))
     return query.all()
 
 @router.get("/modules", response_model=list[IssueModuleResponse])
@@ -133,8 +206,9 @@ async def list_modules(
     current_user: Annotated[User, Depends(get_current_user)]
 ):
     query = db.query(IssueModule).filter(IssueModule.is_active == True)
-    if current_user.company_id:
-        query = query.filter((IssueModule.company_id == current_user.company_id) | (IssueModule.company_id == None))
+    cid = get_effective_company_id(current_user)
+    if cid is not None:
+        query = query.filter((IssueModule.company_id == cid) | (IssueModule.company_id == None))
     return query.all()
 
 
@@ -152,7 +226,7 @@ async def semantic_search(
     """
     try:
         results = service.semantic_search(
-            db, query=data.query, project_id=data.project_id, limit=data.limit, company_id=user.company_id
+            db, query=data.query, project_id=data.project_id, limit=data.limit, company_id=get_effective_company_id(user)
         )
         return results
     except Exception as e:
@@ -184,18 +258,48 @@ async def search_issues(
         if embedding is None:
             return []
 
+        cid = get_effective_company_id(user)
         results = service.find_similar_for_embedding(
             db,
             embedding=embedding,
             exclude_issue_id=search_request.exclude_issue_id,
             project_id=search_request.project_id,
-            company_id=user.company_id,
+            company_id=cid,
         )
         # Return in backward-compatible format: [{issue: {...}, similarity: float}]
-        return [{"issue": serialize(service.get(db, r["id"], company_id=user.company_id)), "similarity": r["similarity_score"]} for r in results]
+        return [{"issue": serialize(service.get(db, r["id"], company_id=cid)), "similarity": r["similarity_score"]} for r in results]
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Search temporarily unavailable")
+
+
+class HybridSearchRequest(BaseModel):
+    query: str = ""
+    project_id: int | None = None
+    status_id: int | None = None
+    issue_type: str | None = None
+    limit: int | None = 50
+
+
+@router.post("/hybrid-search", response_model=list[IssueResponse])
+async def hybrid_search_endpoint(
+    data: HybridSearchRequest,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    """
+    Unified Hybrid Search endpoint combining keyword and semantic search with strict tenant isolation.
+    """
+    issues = service.hybrid_search(
+        db,
+        query=data.query,
+        user=user,
+        project_id=data.project_id,
+        status_id=data.status_id,
+        issue_type=data.issue_type,
+        limit=data.limit or 50,
+    )
+    return [serialize(i, user) for i in issues]
 
 
 # ── CRUD Endpoints ──
@@ -206,6 +310,9 @@ async def list_issues(
     user: Annotated[User, Depends(get_current_user)],
     issue_type: str | None = Query(default=None),
     requesting_company_id: int | None = Query(default=None),
+    q: str | None = Query(default=None),
+    project_id: int | None = Query(default=None),
+    status_id: int | None = Query(default=None),
 ):
     user_roles = [r.name for r in user.roles]
     reporter_id = user.id if "Reporter" in user_roles and "Admin" not in user_roles and "Project Manager" not in user_roles and "Team Leader" not in user_roles and "QA" not in user_roles else None
@@ -215,18 +322,38 @@ async def list_issues(
     if "Super Admin" not in user_roles and requesting_company_id and requesting_company_id != user.company_id:
         raise HTTPException(status_code=403, detail="Cannot view feature requests of another company")
 
-    issues = service.repository.list(
-        db,
-        reporter_id=reporter_id,
-        company_id=user.company_id,
-        issue_type=issue_type,
-        requesting_company_id=effective_req_company,
-    )
+    is_bf = service.is_bugforge_user(db, user)
+    if q and q.strip():
+        issues = service.hybrid_search(
+            db,
+            query=q.strip(),
+            user=user,
+            project_id=project_id,
+            status_id=status_id,
+            issue_type=issue_type,
+            requesting_company_id=effective_req_company,
+            reporter_id=reporter_id,
+        )
+    else:
+        issues = service.repository.list(
+            db,
+            reporter_id=reporter_id,
+            project_ids=[project_id] if project_id else None,
+            company_id=get_effective_company_id(user),
+            issue_type=issue_type,
+            requesting_company_id=effective_req_company,
+            is_bugforge=is_bf,
+            include_client_requests=True,
+        )
+        if status_id is not None:
+            issues = [i for i in issues if i.status_id == status_id]
     return [serialize(i, user) for i in issues]
 
 @router.get("/{issue_id}", response_model=IssueResponse)
 async def get_issue(issue_id: int, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
-    return serialize(service.get(db, issue_id, company_id=user.company_id), user)
+    is_bf = service.is_bugforge_user(db, user)
+    return serialize(service.get(db, issue_id, company_id=get_effective_company_id(user), is_bugforge=is_bf), user)
+
 
 @router.post("/feature-requests", response_model=IssueResponse, status_code=status.HTTP_201_CREATED)
 async def submit_feature_request(
@@ -270,7 +397,7 @@ async def create_issue(data: IssueCreate, db: Annotated[Session, Depends(get_db)
                 embedding=list(created.embedding_vector),
                 exclude_issue_id=created.id,
                 project_id=created.project_id,
-                company_id=user.company_id,
+                company_id=get_effective_company_id(user),
             )
     except Exception as e:
         logger.error(f"Similar issue detection during creation failed: {e}")
@@ -313,6 +440,12 @@ async def update_issue_status(issue_id: int, data: IssueStatusUpdate, db: Annota
     old_resolution = issue.resolution
 
     issue.status_id = data.status_id
+    if target_status.name == "Resolved" or target_status.category == "resolved":
+        if not getattr(issue, "developer_fixed_at", None):
+            issue.developer_fixed_at = datetime.now(timezone.utc)
+    elif target_status.category in ("open", "in_progress"):
+        issue.developer_fixed_at = None
+
     if data.root_cause is not None:
         issue.root_cause = data.root_cause.strip() if isinstance(data.root_cause, str) else data.root_cause
     if data.resolution is not None:
@@ -356,6 +489,8 @@ async def update_issue_status(issue_id: int, data: IssueStatusUpdate, db: Annota
         project_id=issue.project_id,
         reporter_id=issue.reporter_id,
         assigned_to=issue.assigned_to,
+        assigned_qa_id=getattr(issue, 'assigned_qa_id', None),
+        developer_fixed_at=getattr(issue, 'developer_fixed_at', None),
         embedding_vector=issue.embedding_vector,
         created_at=issue.created_at,
         updated_at=issue.updated_at,
@@ -366,6 +501,20 @@ async def update_issue_status(issue_id: int, data: IssueStatusUpdate, db: Annota
 
     # Send notifications on workflow status changes
     service.notify_status_change(db, issue, old_status, data.status_id, user)
+
+    # Sync status to linked customization request if exists
+    try:
+        from app.models.customization_request import CustomizationRequest
+        linked_cr = db.query(CustomizationRequest).filter(CustomizationRequest.linked_issue_id == issue.id).first()
+        if linked_cr:
+            if target_status.name in ["Resolved", "Closed"]:
+                linked_cr.status = "Implemented"
+            elif target_status.name in ["In Progress", "In QA", "Testing"]:
+                linked_cr.status = "Under Review"
+            db.add(linked_cr)
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error syncing status to linked customization request: {e}")
 
     return serialize(issue, user)
 
@@ -385,6 +534,20 @@ async def update_issue_assignee(
     Assign issue to developer. Authorized for Super Admin, Admin, and PM/TL of the assigned team.
     """
     updated = service.assign_developer(db, issue_id, data.assigned_to, user)
+    return serialize(updated, user)
+
+
+@router.patch("/{issue_id}/assign-qa", response_model=IssueResponse)
+async def update_issue_qa_assignee(
+    issue_id: int,
+    data: IssueAssignQAUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+):
+    """
+    Assign issue to QA engineer. Authorized for Super Admin, Admin, PM, TL, and QA.
+    """
+    updated = service.assign_qa(db, issue_id, data.assigned_qa_id, user)
     return serialize(updated, user)
 
 
@@ -442,7 +605,7 @@ async def get_similar_issues(
     Results are filtered by project and sorted by similarity score.
     """
     try:
-        return service.find_similar_issues(db, issue_id, project_id=project_id, company_id=user.company_id)
+        return service.find_similar_issues(db, issue_id, project_id=project_id, company_id=get_effective_company_id(user))
     except HTTPException:
         raise
     except Exception as e:
@@ -476,18 +639,22 @@ def serialize_comment(c):
     }
 
 @router.get("/{issue_id}/history", response_model=list[IssueHistoryResponse])
-async def get_issue_history(issue_id: int, db: Annotated[Session, Depends(get_db)], _: Annotated[User, Depends(get_current_user)]):
-    return [serialize_history(h) for h in service.get_history(db, issue_id)]
+async def get_issue_history(issue_id: int, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    cid = get_effective_company_id(user)
+    return [serialize_history(h) for h in service.get_history(db, issue_id, company_id=cid)]
 
 @router.get("/{issue_id}/comments", response_model=list[IssueCommentResponse])
-async def get_issue_comments(issue_id: int, db: Annotated[Session, Depends(get_db)], _: Annotated[User, Depends(get_current_user)]):
-    return [serialize_comment(c) for c in service.get_comments(db, issue_id)]
+async def get_issue_comments(issue_id: int, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    cid = get_effective_company_id(user)
+    return [serialize_comment(c) for c in service.get_comments(db, issue_id, company_id=cid)]
 
 @router.post("/{issue_id}/comments", response_model=IssueCommentResponse, status_code=status.HTTP_201_CREATED)
 async def create_issue_comment(issue_id: int, data: IssueCommentCreate, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     try:
         comment = service.create_comment(db, issue_id, data.content, user)
         return serialize_comment(comment)
+    except HTTPException:
+        raise
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Failed to create comment on issue {issue_id}: {e}")
@@ -514,9 +681,10 @@ def serialize_attachment(a):
 async def get_issue_attachments(
     issue_id: int,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_user)],
 ):
-    return [serialize_attachment(a) for a in service.get_attachments(db, issue_id)]
+    cid = get_effective_company_id(user)
+    return [serialize_attachment(a) for a in service.get_attachments(db, issue_id, company_id=cid)]
 
 
 @router.post("/{issue_id}/attachments", status_code=status.HTTP_201_CREATED)

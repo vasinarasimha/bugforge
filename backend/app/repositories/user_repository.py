@@ -13,10 +13,12 @@ class UserRepository:
             stmt = stmt.where(User.is_active == True)
         return db.scalar(stmt)
 
-    def get_by_id(self, db: Session, user_id: int, include_inactive: bool = False) -> User | None:
+    def get_by_id(self, db: Session, user_id: int, include_inactive: bool = False, company_id: Optional[int] = None) -> User | None:
         stmt = select(User).where(User.id == user_id)
         if not include_inactive:
             stmt = stmt.where(User.is_active == True)
+        if company_id is not None:
+            stmt = stmt.where(User.company_id == company_id)
         return db.scalar(stmt)
 
     def get_role_by_name(self, db: Session, name: str) -> Role | None:
@@ -72,10 +74,12 @@ class UserRepository:
         db.refresh(user)
         return user
 
-    def list(self, db: Session, include_system: bool = False) -> list[User]:
+    def list(self, db: Session, include_system: bool = False, company_id: Optional[int] = None) -> list[User]:
         stmt = select(User).where(User.is_active == True)
         if not include_system:
             stmt = stmt.where(User.is_system_user == False)
+        if company_id is not None:
+            stmt = stmt.where(User.company_id == company_id)
         return list(db.scalars(stmt))
 
     def list_employees(

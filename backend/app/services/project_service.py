@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.api.dependencies.auth import get_effective_company_id, is_super_admin
 from app.models.project import Project
 from app.models.user import User
 from app.repositories.project_repository import ProjectRepository
@@ -46,7 +47,10 @@ class ProjectService:
 
     def create(self, db: Session, data: ProjectCreate, user: User):
         print(f"services/project_service.py Creating project with name: {data.name}")
-        company_id = user.company_id or 1
+        is_super = is_super_admin(user)
+        company_id = getattr(data, 'company_id', None) if is_super else (user.company_id or 1)
+        if not company_id:
+            company_id = user.company_id or 1
         self._validate_members(db, data.project_manager_id, data.team_leader_id, company_id)
 
         project = Project(
@@ -69,8 +73,9 @@ class ProjectService:
 
     def update(self, db: Session, project_id: int, data: ProjectUpdate, user: User):
         print(f"services/project_service.py Updating project with ID {project_id}")
-        project = self.get(db, project_id, company_id=user.company_id)
-        self._validate_members(db, data.project_manager_id, data.team_leader_id, user.company_id)
+        effective_cid = get_effective_company_id(user)
+        project = self.get(db, project_id, company_id=effective_cid)
+        self._validate_members(db, data.project_manager_id, data.team_leader_id, project.company_id)
         
         project.name = data.name.strip()
         project.key = data.key.strip().upper()
@@ -87,12 +92,12 @@ class ProjectService:
         
         db.commit()
         db.refresh(project)
-        return self.repository.get(db, project.id, company_id=user.company_id)
+        return self.repository.get(db, project.id, company_id=effective_cid)
 
     def delete(self, db: Session, project_id: int, user: User | None = None):
         print(f"services/project_service.py Deleting project with ID {project_id}")
-        company_id = user.company_id if user else None
-        project = self.get(db, project_id, company_id=company_id)
+        effective_cid = get_effective_company_id(user) if user else None
+        project = self.get(db, project_id, company_id=effective_cid)
         
         # Cascade soft-delete to issues
         for issue in project.issues:

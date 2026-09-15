@@ -196,12 +196,14 @@ class NotificationService:
         db: Session,
         user_id: int | None = None,
         older_than_days: int = 1,
+        company_id: int | None = None,
     ) -> int:
         """
         Delete read notifications (is_read == True) older than `older_than_days`.
         Strictly preserves all unread notifications (is_read == False).
         If user_id is provided, purges read notifications only for that user.
-        If user_id is None, purges system-wide (for automated daily maintenance).
+        If company_id is provided and user_id is None, purges for that company.
+        If both are None, purges system-wide (for automated daily maintenance).
         """
         cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
         query = db.query(Notification).filter(
@@ -213,12 +215,14 @@ class NotificationService:
         )
         if user_id is not None:
             query = query.filter(Notification.recipient_id == user_id)
+        elif company_id is not None:
+            query = query.filter(Notification.company_id == company_id)
 
         deleted_count = query.delete(synchronize_session=False)
         db.commit()
         logger.info(
             f"Notification cleanup: purged {deleted_count} read record(s) "
-            f"(user_id={user_id}, older_than_days={older_than_days})."
+            f"(user_id={user_id}, company_id={company_id}, older_than_days={older_than_days})."
         )
         return deleted_count
 

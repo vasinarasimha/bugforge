@@ -146,7 +146,7 @@ export default function CompanyDetailsPage() {
               </div>
               {company.legal_name && <div className="text-xs text-muted mt-0.5">{company.legal_name}</div>}
               <div className="text-xs text-muted mt-1">
-                <span className="me-3">Tenant ID: <strong>{company.id}</strong></span>
+                <span className="me-3">Domain: <strong>{company.domain || 'bugforge.internal'}</strong></span>
                 <span>Created on: {new Date(company.created_at).toLocaleDateString()}</span>
               </div>
             </div>
@@ -432,7 +432,7 @@ export default function CompanyDetailsPage() {
                           <td className="py-2 font-semibold">
                             <AuditActionBadge action={log.action} showIcon />
                           </td>
-                          <td className="py-2 text-muted">{log.entity_type} {log.entity_id ? `(#${log.entity_id})` : ''}</td>
+                          <td className="py-2 text-muted">{log.entity_type}</td>
                           <td className="py-2 font-medium">{log.user_name || 'System / Admin'}</td>
                         </tr>
                       ))}

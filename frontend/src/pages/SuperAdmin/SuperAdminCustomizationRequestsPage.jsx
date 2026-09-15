@@ -117,7 +117,8 @@ export default function SuperAdminCustomizationRequestsPage() {
           <table className="table table-hover align-middle mb-0">
             <thead className="table-light text-muted text-xs text-uppercase">
               <tr>
-                <th className="ps-4 py-3">ID & Title</th>
+                <th className="ps-4 py-3">Request Title</th>
+                <th className="py-3">Type</th>
                 <th className="py-3">Company</th>
                 <th className="py-3">Requester</th>
                 <th className="py-3">Category</th>
@@ -129,14 +130,14 @@ export default function SuperAdminCustomizationRequestsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-5 text-muted">
+                  <td colSpan="8" className="text-center py-5 text-muted">
                     <div className="spinner-border spinner-border-sm text-primary me-2" role="status" />
                     Loading requests...
                   </td>
                 </tr>
               ) : requests.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-5 text-muted">
+                  <td colSpan="8" className="text-center py-5 text-muted">
                     <i className="bi bi-inbox fs-2 text-slate-300 d-block mb-2" />
                     No customization requests matching current filter.
                   </td>
@@ -145,10 +146,22 @@ export default function SuperAdminCustomizationRequestsPage() {
                 requests.map((r) => (
                   <tr key={r.id}>
                     <td className="ps-4 py-3">
-                      <div className="font-semibold text-slate-900">{r.title}</div>
+                      <div className="d-flex align-items-center gap-2">
+                        <span className="font-semibold text-slate-900">{r.title}</span>
+                        {r.linked_issue_key && (
+                          <span className="badge bg-indigo-50 text-indigo-700 border border-indigo-200" style={{ fontSize: '0.7rem' }}>
+                            <i className="bi bi-link-45deg me-1"></i>{r.linked_issue_key}
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-muted text-truncate" style={{ maxWidth: '350px' }}>
                         {r.description}
                       </div>
+                    </td>
+                    <td className="py-3">
+                      <span className={`badge ${r.request_type === 'Defect' ? 'bg-danger-subtle text-danger' : 'bg-primary-subtle text-primary'} border`}>
+                        {r.request_type === 'Defect' ? 'Defect' : 'Feature'}
+                      </span>
                     </td>
                     <td className="py-3">
                       <span className="badge bg-light text-slate-700 border px-2.5 py-1">
@@ -189,7 +202,14 @@ export default function SuperAdminCustomizationRequestsPage() {
             <div className="modal-content border-0 shadow-lg rounded-3">
               <div className="modal-header border-bottom py-3 px-4">
                 <div>
-                  <h2 className="modal-title h5 font-bold text-slate-900 mb-0">Review Customization Request #{selectedRequest.id}</h2>
+                  <div className="d-flex align-items-center gap-2">
+                    <h2 className="modal-title h5 font-bold text-slate-900 mb-0">Review Customization Request</h2>
+                    {selectedRequest.linked_issue_key && (
+                      <span className="badge bg-indigo-100 text-indigo-700 border border-indigo-300">
+                        <i className="bi bi-link-45deg me-1"></i>{selectedRequest.linked_issue_key}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-muted">Requested by {selectedRequest.requester_name} ({selectedRequest.company_name})</span>
                 </div>
                 <button type="button" className="btn-close" onClick={() => setSelectedRequest(null)} aria-label="Close" />

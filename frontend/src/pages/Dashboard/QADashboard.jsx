@@ -37,7 +37,15 @@ export default function QADashboard() {
   const inProgressIssues = issues.filter(i => i.status_name === 'In Progress')
 
   // QA focuses on Resolved defects to test/verify
-  const resolvedIssues = issues.filter(i => i.status_name === 'Resolved')
+  // If a specific QA is assigned, only that QA sees it in their verification queue.
+  // If no QA is assigned yet, all QAs see it so they can claim/verify it.
+  const resolvedIssues = issues.filter(i => {
+    if (i.status_name !== 'Resolved') return false
+    if (i.assigned_qa_id) {
+      return i.assigned_qa_id === user?.id
+    }
+    return true
+  })
 
   const statCards = [
     { label: 'Ready for QA', value: resolvedIssues.length, note: 'Defects to test', icon: 'bi-bug-fill', tone: 'primary' },
@@ -80,22 +88,41 @@ export default function QADashboard() {
                 <th>Key</th>
                 <th>Title</th>
                 <th>Priority</th>
+                <th>Assigned QA</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {resolvedIssues.map(i => (
-                <tr key={i.id}>
+                <tr key={i.id} className={i.is_qa_unassigned_over_1h ? 'table-danger' : ''}>
                   <td>{i.issue_key}</td>
-                  <td>{i.title}</td>
+                  <td>
+                    {i.title}
+                    {i.is_qa_unassigned_over_1h && (
+                      <span className="badge bg-danger ms-2" style={{ fontSize: '0.72rem' }}>
+                        &gt;1h QA Unassigned
+                      </span>
+                    )}
+                  </td>
                   <td><span className="badge bg-secondary">{i.priority}</span></td>
+                  <td>
+                    {i.assigned_qa_name ? (
+                      <span className="badge bg-primary-subtle text-primary border border-primary-subtle">
+                        {i.assigned_qa_id === user?.id ? 'Assigned to You' : i.assigned_qa_name}
+                      </span>
+                    ) : (
+                      <span className="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                        Unassigned
+                      </span>
+                    )}
+                  </td>
                   <td>
                     <button className="btn btn-sm btn-success me-2" onClick={() => handleAction(i, 'resolve')}>Verify (Close)</button>
                     <button className="btn btn-sm btn-danger" onClick={() => handleAction(i, 'unresolve')}>Reject (In Progress)</button>
                   </td>
                 </tr>
               ))}
-              {resolvedIssues.length === 0 && <tr><td colSpan="4" className="text-center">No resolved defects pending verification.</td></tr>}
+              {resolvedIssues.length === 0 && <tr><td colSpan="5" className="text-center">No resolved defects pending verification.</td></tr>}
             </tbody>
           </table>
         </div>

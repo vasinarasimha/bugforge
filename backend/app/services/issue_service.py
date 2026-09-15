@@ -2,8 +2,10 @@ from __future__ import annotations
 import logging
 
 from fastapi import HTTPException, status
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
+from app.api.dependencies.auth import get_effective_company_id
 from app.core.config import get_settings
 from app.models.issue import Issue, IssueCategory, IssueModule
 from app.models.user import User
@@ -23,17 +25,31 @@ class IssueService:
     def __init__(self):
         self.repository = IssueRepository()
 
-    def list(self, db: Session, reporter_id: int | None = None, project_ids: list[int] | None = None, company_id: int | None = None):
-        return self.repository.list(db, reporter_id=reporter_id, project_ids=project_ids, company_id=company_id)
+    def list(self, db: Session, reporter_id: int | None = None, project_ids: list[int] | None = None, company_id: int | None = None, is_bugforge: bool = False):
+        return self.repository.list(db, reporter_id=reporter_id, project_ids=project_ids, company_id=company_id, is_bugforge=is_bugforge)
 
-    def get(self, db: Session, issue_id: int, company_id: int | None = None):
-        issue = self.repository.get(db, issue_id, company_id=company_id)
+    def is_bugforge_user(self, db: Session, user: User) -> bool:
+        if not user:
+            return False
+        user_roles = [r.name for r in getattr(user, 'roles', [])]
+        if "Super Admin" in user_roles:
+            return True
+        if getattr(user, 'company', None) and getattr(user.company, 'name', '').lower() == "bugforge":
+            return True
+        bf_comp = self._get_or_create_bugforge_company(db)
+        if user.company_id and user.company_id == bf_comp.id:
+            return True
+        return False
+
+    def get(self, db: Session, issue_id: int, company_id: int | None = None, is_bugforge: bool = False):
+        issue = self.repository.get(db, issue_id, company_id=company_id, is_bugforge=is_bugforge)
         if not issue:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Issue not found")
         return issue
 
+
     def delete(self, db: Session, issue_id: int, user: User):
-        issue = self.get(db, issue_id, company_id=user.company_id)
+        issue = self.get(db, issue_id, company_id=get_effective_company_id(user))
         self.repository.delete(db, issue)
 
     def _validate_references(self, db: Session, data: IssueCreate | IssueUpdate, company_id: int | None = None):
@@ -49,6 +65,12 @@ class IssueService:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected assignee does not exist")
             if company_id is not None and getattr(assignee, 'company_id', None) != company_id:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot assign issue to user from another company")
+        if hasattr(data, 'assigned_qa_id') and data.assigned_qa_id:
+            qa_user = UserRepository().get_by_id(db, data.assigned_qa_id)
+            if not qa_user:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected QA assignee does not exist")
+            if company_id is not None and getattr(qa_user, 'company_id', None) != company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot assign QA user from another company")
         if hasattr(data, 'sprint_id') and data.sprint_id:
             from app.models.sprint import Sprint
             sprint = db.query(Sprint).filter(Sprint.id == data.sprint_id).first()
@@ -122,12 +144,28 @@ class IssueService:
         return f"{prefix}-{candidate_num}"
 
     def create(self, db: Session, data: IssueCreate, user: User):
-        self._validate_references(db, data, company_id=user.company_id)
-        project = ProjectRepository().get(db, data.project_id)
-        issue_key = self._generate_next_issue_key(db, project.key)
+        user_roles = [r.name for r in getattr(user, 'roles', [])]
+        is_super_admin = "Super Admin" in user_roles
 
-        issue_data = data.model_dump()
-        issue_data['company_id'] = user.company_id or getattr(project, 'company_id', 1) or 1
+        # Requirement 7: For Feature requests submitted by customer/company admins,
+        # canonical project must be BugForge (project = BugForge), requesting_company_id is set
+        if data.issue_type == "Feature" and (user.company_id is not None and not is_super_admin):
+            bf_comp = self._get_or_create_bugforge_company(db)
+            bf_project = self._get_or_create_bugforge_project(db)
+            data.project_id = bf_project.id
+            self._validate_references(db, data, company_id=None)
+            project = bf_project
+            issue_data = data.model_dump()
+            issue_data['project_id'] = bf_project.id
+            issue_data['company_id'] = bf_comp.id
+            issue_data['requesting_company_id'] = user.company_id
+        else:
+            self._validate_references(db, data, company_id=user.company_id)
+            project = ProjectRepository().get(db, data.project_id)
+            issue_data = data.model_dump()
+            issue_data['company_id'] = user.company_id or getattr(project, 'company_id', 1) or 1
+
+        issue_key = self._generate_next_issue_key(db, project.key)
 
         # Resolve category/module names for richer embedding
         category_name, module_name = self._resolve_names_for_embedding(
@@ -158,7 +196,8 @@ class IssueService:
         from app.models.issue import IssueStatus, IssuePriority, IssueSeverity, IssueCategory, IssueModule
         from app.models.user import User as UserModel
         
-        for field, value in data.model_dump(exclude_unset=True).items():
+        dumped_data = data if isinstance(data, dict) else data.model_dump(exclude_unset=True)
+        for field, value in dumped_data.items():
             if isinstance(value, str) and value.strip() == '':
                 value = None
             old_value = getattr(issue, field)
@@ -174,6 +213,12 @@ class IssueService:
                     new_s = db.query(IssueStatus).filter(IssueStatus.id == value).first()
                     old_str = old_s.name if old_s else old_str
                     new_str = new_s.name if new_s else new_str
+                    if new_s and (new_s.name == "Resolved" or new_s.category == "resolved"):
+                        if not getattr(issue, "developer_fixed_at", None):
+                            from datetime import datetime, timezone
+                            issue.developer_fixed_at = datetime.now(timezone.utc)
+                    elif new_s and new_s.category in ("open", "in_progress"):
+                        issue.developer_fixed_at = None
                 elif field == 'priority_id':
                     old_p = db.query(IssuePriority).filter(IssuePriority.id == old_value).first()
                     new_p = db.query(IssuePriority).filter(IssuePriority.id == value).first()
@@ -197,6 +242,11 @@ class IssueService:
                 elif field == 'assigned_to':
                     old_u = db.query(UserModel).filter(UserModel.id == old_value).first()
                     new_u = db.query(UserModel).filter(UserModel.id == value).first()
+                    old_str = old_u.full_name if old_u else old_str
+                    new_str = new_u.full_name if new_u else new_str
+                elif field == 'assigned_qa_id':
+                    old_u = db.query(UserModel).filter(UserModel.id == old_value).first() if old_value else None
+                    new_u = db.query(UserModel).filter(UserModel.id == value).first() if value else None
                     old_str = old_u.full_name if old_u else old_str
                     new_str = new_u.full_name if new_u else new_str
                 elif field == 'reporter_id':
@@ -248,9 +298,22 @@ class IssueService:
             if embedding is not None:
                 issue.embedding_vector = embedding
 
+        # Synchronize CustomizationRequest status if this issue is linked to one
+        from app.models.customization_request import CustomizationRequest
+        custom_req = db.query(CustomizationRequest).filter(CustomizationRequest.linked_issue_id == issue.id).first()
+        if custom_req:
+            status_obj = db.query(IssueStatus).filter(IssueStatus.id == issue.status_id).first() if issue.status_id else None
+            if status_obj:
+                if status_obj.name in ["Resolved", "Closed"] or getattr(status_obj, 'category', '') in ["resolved", "closed"]:
+                    custom_req.status = "Implemented"
+                elif status_obj.name in ["In Progress", "In Development"] or getattr(status_obj, 'category', '') == "in_progress":
+                    if custom_req.status in ["Pending", "Under Review"]:
+                        custom_req.status = "Under Review"
+
         db.commit()
         db.refresh(issue)
         return self.repository.get(db, issue.id)
+
 
     def find_similar_issues(self, db: Session, issue_id: int, project_id: int | None = None, company_id: int | None = None):
         """Find issues similar to an existing issue using pgvector similarity."""
@@ -345,36 +408,189 @@ class IssueService:
             })
         return formatted
 
-    def get_history(self, db: Session, issue_id: int):
+    def hybrid_search(
+        self,
+        db: Session,
+        query: str,
+        user: User,
+        project_id: int | None = None,
+        status_id: int | None = None,
+        issue_type: str | None = None,
+        requesting_company_id: int | None = None,
+        reporter_id: int | None = None,
+        limit: int = 50,
+    ) -> list[Issue]:
+        """
+        Unified Hybrid Search combining keyword and semantic/vector search with tenant safety.
+        - Keyword search: matching issue_key, title, description with SQL ILIKE
+        - Semantic search: pgvector cosine distance on embedding_vector
+        - Graceful degradation: if embedding fails, keyword search results are still returned
+        - Strict tenant isolation: company filters applied at database query level
+        - Merges, scores, ranks and deduplicates results by Issue.id
+        """
+        user_roles = [r.name for r in getattr(user, 'roles', [])]
+        is_super_admin = "Super Admin" in user_roles
+        user_company_id = getattr(user, 'company_id', None)
+
+        clean_query = (query or "").strip()
+        is_bf = self.is_bugforge_user(db, user)
+        if not clean_query:
+            # Empty search behavior: return normal issue list
+            return self.repository.list(
+                db,
+                reporter_id=reporter_id,
+                project_ids=[project_id] if project_id else None,
+                company_id=user_company_id,
+                issue_type=issue_type,
+                requesting_company_id=requesting_company_id,
+                is_bugforge=is_bf,
+            )
+
+        # 1. Keyword search (DB-level with strict tenant filtering)
+        kw_stmt = (
+            select(Issue)
+            .options(*self.repository._options)
+            .where(Issue.is_deleted == False, Issue.is_active == True)
+        )
+        if not is_super_admin and user_company_id is not None:
+            if is_bf:
+                kw_stmt = kw_stmt.where(
+                    (Issue.company_id == user_company_id) | (Issue.requesting_company_id.isnot(None))
+                )
+            else:
+                kw_stmt = kw_stmt.where(Issue.company_id == user_company_id)
+        if requesting_company_id is not None and is_bf:
+            kw_stmt = kw_stmt.where(Issue.requesting_company_id == requesting_company_id)
+
+        if reporter_id is not None:
+            kw_stmt = kw_stmt.where(Issue.reporter_id == reporter_id)
+        if project_id is not None:
+            kw_stmt = kw_stmt.where(Issue.project_id == project_id)
+        if status_id is not None:
+            kw_stmt = kw_stmt.where(Issue.status_id == status_id)
+        if issue_type is not None:
+            kw_stmt = kw_stmt.where(Issue.issue_type == issue_type)
+
+        q_term = f"%{clean_query}%"
+        kw_conditions = [
+            Issue.issue_key.ilike(q_term),
+            Issue.title.ilike(q_term),
+            Issue.description.ilike(q_term),
+        ]
+        parsed_id = None
+        if clean_query.lstrip("#").isdigit():
+            parsed_id = int(clean_query.lstrip("#"))
+            kw_conditions.append(Issue.id == parsed_id)
+
+        kw_stmt = kw_stmt.where(or_(*kw_conditions))
+        keyword_issues = list(db.scalars(kw_stmt))
+
+        # 2. Semantic vector search (DB-level with strict tenant filtering)
+        semantic_scored: list[tuple[Issue, float]] = []
+        try:
+            embedding = embedding_service.embed_query(clean_query)
+            if embedding is not None:
+                cid = None if is_super_admin else user_company_id
+                raw_sem = self.repository.semantic_search(
+                    db,
+                    embedding=embedding,
+                    project_id=project_id,
+                    company_id=cid,
+                    limit=limit or 30,
+                    similarity_threshold=0.40,
+                )
+                for iss, score in raw_sem:
+                    if status_id is not None and iss.status_id != status_id:
+                        continue
+                    if issue_type is not None and iss.issue_type != issue_type:
+                        continue
+                    if requesting_company_id is not None and iss.requesting_company_id != requesting_company_id:
+                        continue
+                    if reporter_id is not None and iss.reporter_id != reporter_id:
+                        continue
+                    semantic_scored.append((iss, score))
+        except Exception as e:
+            logger.warning(f"Semantic search service unavailable during hybrid search: {e}")
+
+        # 3. Combine, rank and deduplicate
+        combined: dict[int, dict] = {}
+        q_lower = clean_query.lower()
+
+        for iss in keyword_issues:
+            score = 0.0
+            if parsed_id is not None and iss.id == parsed_id:
+                score += 150.0  # Direct ID match: highest priority
+
+            key_lower = iss.issue_key.lower() if iss.issue_key else ""
+            title_lower = iss.title.lower() if iss.title else ""
+            desc_lower = iss.description.lower() if iss.description else ""
+
+            if key_lower == q_lower:
+                score += 100.0
+            elif q_lower in key_lower:
+                score += 60.0
+
+            if title_lower == q_lower:
+                score += 80.0
+            elif q_lower in title_lower:
+                score += 45.0
+
+            if q_lower in desc_lower:
+                score += 15.0
+
+            combined[iss.id] = {
+                "issue": iss,
+                "score": score,
+                "matched_kw": True,
+                "matched_sem": False,
+            }
+
+        for iss, sim in semantic_scored:
+            sem_boost = float(sim) * 50.0
+            if iss.id in combined:
+                # Matched both keyword and semantic! Boost significantly
+                combined[iss.id]["score"] += sem_boost + 25.0
+                combined[iss.id]["matched_sem"] = True
+            else:
+                combined[iss.id] = {
+                    "issue": iss,
+                    "score": sem_boost,
+                    "matched_kw": False,
+                    "matched_sem": True,
+                }
+
+        sorted_items = sorted(combined.values(), key=lambda x: x["score"], reverse=True)
+        return [item["issue"] for item in sorted_items[:limit]]
+
+    def get_history(self, db: Session, issue_id: int, company_id: int | None = None):
         from app.models.history import IssueHistory
         from sqlalchemy.orm import selectinload
+        self.get(db, issue_id, company_id=company_id)
         return db.query(IssueHistory).options(selectinload(IssueHistory.user)).filter(IssueHistory.issue_id == issue_id).order_by(IssueHistory.created_at.desc()).all()
 
-    def get_comments(self, db: Session, issue_id: int):
+    def get_comments(self, db: Session, issue_id: int, company_id: int | None = None):
         from app.models.comment import IssueComment
         from sqlalchemy.orm import selectinload
+        self.get(db, issue_id, company_id=company_id)
         return db.query(IssueComment).options(selectinload(IssueComment.user)).filter(IssueComment.issue_id == issue_id).order_by(IssueComment.created_at.desc()).all()
 
     def create_comment(self, db: Session, issue_id: int, content: str, user: User):
         from app.models.comment import IssueComment
-        issue = self.get(db, issue_id)
+        issue = self.get(db, issue_id, company_id=get_effective_company_id(user))
         comment = IssueComment(issue_id=issue.id, user_id=user.id, content=content)
         db.add(comment)
         db.commit()
         db.refresh(comment)
         return comment
 
-    def delete(self, db: Session, issue_id: int, user: User):
-        issue = self.get(db, issue_id)
-        self.repository.delete(db, issue)
-
-    def get_attachments(self, db: Session, issue_id: int):
+    def get_attachments(self, db: Session, issue_id: int, company_id: int | None = None):
         from app.models.attachment import IssueAttachment
+        self.get(db, issue_id, company_id=company_id)
         return db.query(IssueAttachment).filter(IssueAttachment.issue_id == issue_id).order_by(IssueAttachment.created_at.asc()).all()
 
     def add_attachment(self, db: Session, issue_id: int, filename: str, file_path: str, file_size: int | None, mime_type: str | None, user: User):
         from app.models.attachment import IssueAttachment
-        self.get(db, issue_id)  # ensure issue exists
+        self.get(db, issue_id, company_id=get_effective_company_id(user))  # ensure issue exists and belongs to company
         att = IssueAttachment(
             issue_id=issue_id,
             filename=filename,
@@ -390,6 +606,7 @@ class IssueService:
 
     def delete_attachment(self, db: Session, issue_id: int, attachment_id: int, user: User):
         from app.models.attachment import IssueAttachment
+        self.get(db, issue_id, company_id=get_effective_company_id(user))  # ensure issue exists and belongs to company
         att = db.query(IssueAttachment).filter(
             IssueAttachment.id == attachment_id,
             IssueAttachment.issue_id == issue_id
@@ -526,16 +743,50 @@ class IssueService:
     def _get_or_create_bugforge_project(self, db: Session):
         from app.models.project import Project
         bf_comp = self._get_or_create_bugforge_company(db)
-        proj = db.query(Project).filter(Project.company_id == bf_comp.id, Project.is_active == True).first()
+        proj = db.query(Project).filter(
+            Project.company_id == bf_comp.id,
+            Project.key == "BF",
+            Project.is_active == True
+        ).first()
         if not proj:
+            proj = db.query(Project).filter(
+                Project.company_id == bf_comp.id,
+                Project.name == "BugForge",
+                Project.is_active == True
+            ).first()
+            if proj and proj.key != "BF":
+                proj.key = "BF"
+                db.commit()
+                db.refresh(proj)
+        if not proj:
+            from app.models.user import User
+            admin_user = db.query(User).filter(User.company_id == bf_comp.id).first()
+            if not admin_user:
+                admin_user = db.query(User).first()
+            if not admin_user:
+                admin_user = User(
+                    full_name="BugForge Admin",
+                    email="admin@bugforge.internal",
+                    password_hash="mock_hash",
+                    company_id=bf_comp.id,
+                    is_active=True
+                )
+                db.add(admin_user)
+                db.flush()
+
             proj = Project(
-                name="BugForge Platform Features",
-                key="BFP",
+                name="BugForge",
+                key="BF",
                 description="BugForge platform feature requests and customizations",
                 company_id=bf_comp.id,
                 is_active=True,
+                created_by=admin_user.id,
             )
             db.add(proj)
+            db.commit()
+            db.refresh(proj)
+        elif proj.name != "BugForge":
+            proj.name = "BugForge"
             db.commit()
             db.refresh(proj)
         return proj
@@ -548,16 +799,18 @@ class IssueService:
         user: User,
         priority_id: int | None = None,
         severity_id: int | None = None,
+        issue_type: str = "Feature",
     ) -> Issue:
         """
-        Customer Company Admin submits a Feature Request to BugForge.
-        Represented as an Issue with issue_type = 'Feature', company_id = 1 (BugForge),
-        requesting_company_id = user.company_id, and reporter_id = user.id.
+        Customer Company Admin submits a Feature or Defect/Issue Request to BugForge.
+        Represented as an Issue with issue_type in ('Feature', 'Defect'), company_id = BugForge company,
+        project_id = BugForge project, requesting_company_id = user.company_id, and reporter_id = user.id.
         """
         from app.models.issue import IssuePriority, IssueSeverity, IssueStatus
         from app.models.role import Role
         from app.services.notification_service import notification_service
 
+        resolved_type = "Defect" if issue_type == "Defect" else "Feature"
         bf_comp = self._get_or_create_bugforge_company(db)
         bf_project = self._get_or_create_bugforge_project(db)
         issue_key = self._generate_next_issue_key(db, bf_project.key)
@@ -583,14 +836,14 @@ class IssueService:
         embedding = self._generate_embedding_safe(
             title=title.strip(),
             description=description.strip(),
-            issue_type="Feature",
+            issue_type=resolved_type,
         )
 
         feature_issue = Issue(
             issue_key=issue_key,
             title=title.strip(),
             description=description.strip(),
-            issue_type="Feature",
+            issue_type=resolved_type,
             project_id=bf_project.id,
             reporter_id=user.id,
             company_id=bf_comp.id,  # Belongs to BugForge internal execution
@@ -607,18 +860,20 @@ class IssueService:
         # 1. Notify Super Admins
         super_admins = db.query(User).join(User.roles).filter(Role.name == "Super Admin", User.is_active == True).all()
         company_label = user.company_name or f"Company #{user.company_id}"
+        notification_type = "CLIENT_DEFECT_SUBMITTED" if resolved_type == "Defect" else "FEATURE_REQUEST_SUBMITTED"
+        notification_title = f"New Client {resolved_type} Request"
         for sa in super_admins:
             notification_service.create_notification(
                 db,
                 recipient_id=sa.id,
                 actor_id=user.id,
                 company_id=bf_comp.id,
-                notification_type="FEATURE_REQUEST_SUBMITTED",
-                title="New Feature Request",
-                message=f"{user.full_name} ({company_label}) submitted Feature: {feature_issue.title}",
+                notification_type=notification_type,
+                title=notification_title,
+                message=f"{user.full_name} ({company_label}) submitted {resolved_type}: {feature_issue.title}",
                 entity_type="ISSUE",
                 entity_id=feature_issue.id,
-                link_url=f"/issues",
+                link_url=f"/issues/{feature_issue.id}",
             )
 
         # 2. Notify Requesting Company Admin
@@ -627,12 +882,13 @@ class IssueService:
             recipient_id=user.id,
             actor_id=user.id,
             company_id=user.company_id or bf_comp.id,
-            notification_type="FEATURE_REQUEST_SUBMITTED",
-            title="Feature Request Submitted",
-            message=f"Feature request '{feature_issue.title}' ({feature_issue.issue_key}) has been submitted to BugForge.",
+            notification_type=notification_type,
+            title=f"Client {resolved_type} Request Submitted",
+            message=f"{resolved_type} request '{feature_issue.title}' ({feature_issue.issue_key}) has been submitted to BugForge.",
             entity_type="ISSUE",
+
             entity_id=feature_issue.id,
-            link_url=f"/issues",
+            link_url=f"/issues/{feature_issue.id}",
         )
 
         return self.repository.get(db, feature_issue.id)
@@ -692,7 +948,7 @@ class IssueService:
                 message=f"{user.full_name} assigned Feature {issue.issue_key} to your team ({team.name})",
                 entity_type="ISSUE",
                 entity_id=issue.id,
-                link_url=f"/issues",
+                link_url=f"/issues/{issue.id}",
             )
 
         return self.repository.get(db, issue.id)
@@ -755,12 +1011,87 @@ class IssueService:
                 message=f"Feature {issue.issue_key} ({issue.title}) was assigned to you",
                 entity_type="ISSUE",
                 entity_id=issue.id,
-                link_url=f"/issues",
+                link_url=f"/issues/{issue.id}",
             )
         else:
             issue.assigned_to = None
             db.commit()
             db.refresh(issue)
+
+        return self.repository.get(db, issue.id)
+
+    def assign_qa(self, db: Session, issue_id: int, qa_id: int | None, user: User) -> Issue:
+        """
+        PM/TL/Admin/Super Admin (or QA) assigns an issue to a QA engineer.
+        """
+        from app.models.history import IssueHistory
+        from app.models.user import User as UserModel
+        from app.services.notification_service import notification_service
+
+        issue = self.repository.get(db, issue_id)
+        if not issue:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Issue not found")
+
+        user_roles = [r.name for r in user.roles]
+        is_super_admin = "Super Admin" in user_roles
+        is_admin = "Admin" in user_roles
+        is_pm = any(r in ["Project Manager", "PM"] for r in user_roles)
+        is_tl = any(r in ["Team Leader", "TL"] for r in user_roles)
+        is_qa = "QA" in user_roles
+
+        can_assign = is_super_admin or (is_admin and user.company_id == issue.company_id) or is_qa
+        if issue.team:
+            if issue.team.team_leader_id == user.id or issue.team.project_manager_id == user.id:
+                can_assign = True
+        if (is_pm or is_tl) and issue.company_id == user.company_id:
+            can_assign = True
+
+        if not can_assign:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Only authorized PM, TL, Admin, or QA can assign QA engineers")
+
+        old_qa_id = issue.assigned_qa_id
+        old_qa_name = issue.assigned_qa.full_name if getattr(issue, 'assigned_qa', None) else None
+
+        if qa_id is not None and qa_id > 0:
+            qa_user = UserRepository().get_by_id(db, qa_id)
+            if not qa_user:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected QA engineer does not exist")
+            if qa_user.company_id != issue.company_id:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "QA engineer must belong to the same organization")
+
+            issue.assigned_qa_id = qa_id
+            new_qa_name = qa_user.full_name
+        else:
+            issue.assigned_qa_id = None
+            new_qa_name = None
+
+        # Track in history
+        if old_qa_id != issue.assigned_qa_id:
+            history = IssueHistory(
+                issue_id=issue.id,
+                user_id=user.id,
+                field_name="assigned_qa_id",
+                old_value=old_qa_name,
+                new_value=new_qa_name
+            )
+            db.add(history)
+
+        db.commit()
+        db.refresh(issue)
+
+        if qa_id is not None and qa_id > 0 and qa_id != user.id:
+            notification_service.create_notification(
+                db,
+                recipient_id=qa_id,
+                actor_id=user.id,
+                company_id=issue.company_id,
+                notification_type="QA_ASSIGNED",
+                title="QA Verification Assigned",
+                message=f"You have been assigned as QA for {issue.issue_key} ({issue.title})",
+                entity_type="ISSUE",
+                entity_id=issue.id,
+                link_url=f"/issues/{issue.id}",
+            )
 
         return self.repository.get(db, issue.id)
 
@@ -872,7 +1203,7 @@ class IssueService:
                     message=f"QA requested rework on Feature {issue.issue_key}: {notes or 'Please review verification comments.'}",
                     entity_type="ISSUE",
                     entity_id=issue.id,
-                    link_url=f"/issues",
+                    link_url=f"/issues/{issue.id}",
                 )
 
         db.commit()
@@ -892,7 +1223,7 @@ class IssueService:
             return
 
         # 1. Closed: notify requesting customer company admin
-        if new_status.is_final or new_status.category == "closed" or new_status.name.lower() == "closed":
+        if (new_status.category == "closed" or new_status.name.lower() == "closed" or (new_status.is_final and new_status.category != "resolved" and new_status.name.lower() != "resolved")):
             if getattr(issue, "requesting_company_id", None) and issue.reporter_id:
                 notification_service.create_notification(
                     db,
@@ -904,26 +1235,42 @@ class IssueService:
                     message=f"Feature {issue.issue_key} was successfully implemented",
                     entity_type="ISSUE",
                     entity_id=issue.id,
-                    link_url=f"/issues",
+                    link_url=f"/issues/{issue.id}",
                 )
 
         # 2. Resolved / Ready for QA: notify QA
-        elif new_status.category == "resolved" or "qa" in new_status.name.lower():
-            qa_users = db.query(User).join(User.roles).filter(
-                Role.name == "QA",
-                User.is_active == True,
-                User.company_id == issue.company_id
-            ).all()
-            for qu in qa_users:
+        elif new_status.category == "resolved" or new_status.name.lower() == "resolved" or "qa" in new_status.name.lower():
+            label = "Feature" if getattr(issue, "issue_type", "") == "Feature" else "Defect"
+            if getattr(issue, "assigned_qa_id", None):
+                # If QA is selected then only the report should be sent only to the particular QA to test it
                 notification_service.create_notification(
                     db,
-                    recipient_id=qu.id,
+                    recipient_id=issue.assigned_qa_id,
                     actor_id=actor.id,
                     company_id=issue.company_id,
                     notification_type="FEATURE_READY_FOR_QA",
                     title="Ready for QA Verification",
-                    message=f"Feature {issue.issue_key} is ready for QA verification",
+                    message=f"{label} {issue.issue_key} was resolved and is ready for your verification",
                     entity_type="ISSUE",
                     entity_id=issue.id,
-                    link_url=f"/issues",
+                    link_url=f"/issues/{issue.id}",
                 )
+            else:
+                qa_users = db.query(User).join(User.roles).filter(
+                    Role.name == "QA",
+                    User.is_active == True,
+                    User.company_id == issue.company_id
+                ).all()
+                for qu in qa_users:
+                    notification_service.create_notification(
+                        db,
+                        recipient_id=qu.id,
+                        actor_id=actor.id,
+                        company_id=issue.company_id,
+                        notification_type="FEATURE_READY_FOR_QA",
+                        title="Ready for QA Verification",
+                        message=f"{label} {issue.issue_key} is ready for QA verification",
+                        entity_type="ISSUE",
+                        entity_id=issue.id,
+                        link_url=f"/issues/{issue.id}",
+                    )

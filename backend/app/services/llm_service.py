@@ -274,26 +274,190 @@ Output ONLY valid JSON in this EXACT format:
             raise ValueError("Empty response from AI model")
         text = content.strip()
         import re
+
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
+
+        # 1. Attempt direct parsing (cleanest for structured outputs)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # 2. Extract code fence block if embedded
+        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if fence_match:
+            try:
+                return json.loads(fence_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # 3. Fallback to outer brackets
         match = re.search(r"(\{.*\})", text, re.DOTALL)
         if match:
             text = match.group(1)
         return json.loads(text)
+
+    def _build_fallback_test_cases(self, defect: dict) -> list[dict]:
+        """Synthesize baseline QA test cases directly from defect context when LLM is unavailable or truncated."""
+        title = defect.get("title", "Reported Defect")
+        steps_raw = defect.get("reproduction_steps")
+        steps = [s.strip() for s in steps_raw.split("\n") if s.strip()] if steps_raw and steps_raw != "N/A" else [
+            f"1. Navigate to the affected module for '{title}'",
+            "2. Perform the actions described in the defect report",
+            "3. Observe system behavior"
+        ]
+        expected = defect.get("expected_behavior") or "Action completes successfully without crashes or errors."
+
+        return [
+            {
+                "test_case_id": "TC-001",
+                "scenario": f"Verify primary happy path fix for: {title}",
+                "test_type": "Positive / Functional",
+                "priority": defect.get("priority_name") or "High",
+                "preconditions": "User is authenticated and test environment is ready.",
+                "steps": steps,
+                "test_data": "Valid test inputs matching defect scenario",
+                "expected_result": expected
+            },
+            {
+                "test_case_id": "TC-002",
+                "scenario": f"Verify validation and error handling for: {title}",
+                "test_type": "Negative / Validation",
+                "priority": "Medium",
+                "preconditions": "User is on the relevant screen or interface.",
+                "steps": [
+                    "1. Trigger the workflow with missing required fields or invalid parameters",
+                    "2. Attempt to submit or complete the action",
+                    "3. Verify field validation indicators appear"
+                ],
+                "test_data": "Empty fields, invalid characters, or malformed inputs",
+                "expected_result": "Application displays clear user-friendly validation messages and does not crash."
+            },
+            {
+                "test_case_id": "TC-003",
+                "scenario": f"Verify boundary limits and rapid interaction for: {title}",
+                "test_type": "Boundary / Edge",
+                "priority": "Medium",
+                "preconditions": "User is on the active interface.",
+                "steps": [
+                    "1. Enter maximum allowed boundary values where applicable",
+                    "2. Submit the action and simulate network latency or rapid double-clicks",
+                    "3. Verify the transaction is handled idempotently"
+                ],
+                "test_data": "Maximum length values or boundary values",
+                "expected_result": "System processes boundary inputs cleanly without duplicate submissions or UI freeze."
+            },
+            {
+                "test_case_id": "TC-004",
+                "scenario": f"Verify regression in related workflows after fixing: {title}",
+                "test_type": "Regression",
+                "priority": "High",
+                "preconditions": "Fix has been deployed to the test environment.",
+                "steps": [
+                    "1. Execute adjacent workflows and features in the same module",
+                    "2. Verify navigation and state consistency across screens",
+                    "3. Confirm audit trail and persisted data are intact"
+                ],
+                "test_data": "N/A",
+                "expected_result": "All adjacent and dependent workflows continue working properly with zero regressions."
+            }
+        ]
+
+    def _normalize_test_cases_response(self, raw_data: dict, defect: dict) -> dict:
+        """Ensure the test cases dictionary strictly conforms to TestCaseGenerationResponse schema."""
+        if not isinstance(raw_data, dict):
+            raw_data = {}
+
+        # Resolve test_cases list from various possible keys
+        test_cases_raw = raw_data.get("test_cases")
+        if not test_cases_raw:
+            for alt_key in ["testCases", "tests", "cases", "scenarios", "test_case_list"]:
+                if alt_key in raw_data and isinstance(raw_data[alt_key], list):
+                    test_cases_raw = raw_data[alt_key]
+                    break
+
+        if not isinstance(test_cases_raw, list) or len(test_cases_raw) == 0:
+            test_cases_raw = self._build_fallback_test_cases(defect)
+
+        sanitized_cases = []
+        for idx, tc in enumerate(test_cases_raw, 1):
+            if not isinstance(tc, dict):
+                continue
+            tc_id = str(tc.get("test_case_id") or f"TC-{idx:03d}")
+            scenario = str(tc.get("scenario") or f"Validate scenario {idx}")
+            test_type = str(tc.get("test_type") or "Positive / Functional")
+            priority = str(tc.get("priority") or "Medium")
+            preconditions = str(tc.get("preconditions") or "Standard environment prerequisites")
+
+            raw_steps = tc.get("steps")
+            if isinstance(raw_steps, list):
+                steps = [str(s) for s in raw_steps if s is not None]
+            elif isinstance(raw_steps, str):
+                steps = [s.strip() for s in raw_steps.split("\n") if s.strip()]
+            else:
+                steps = [f"1. Execute step for {scenario}"]
+            if not steps:
+                steps = [f"1. Execute step for {scenario}"]
+
+            test_data = tc.get("test_data")
+            if test_data is not None:
+                if isinstance(test_data, (dict, list)):
+                    test_data = json.dumps(test_data)
+                else:
+                    test_data = str(test_data)
+
+            expected_result = str(tc.get("expected_result") or "Expected behavior observed without defect reproduction.")
+
+            sanitized_cases.append({
+                "test_case_id": tc_id,
+                "scenario": scenario,
+                "test_type": test_type,
+                "priority": priority,
+                "preconditions": preconditions,
+                "steps": steps,
+                "test_data": test_data,
+                "expected_result": expected_result
+            })
+
+        summary_raw = raw_data.get("summary")
+        if not isinstance(summary_raw, dict):
+            summary_raw = {}
+
+        by_type: dict[str, int] = {}
+        for tc in sanitized_cases:
+            t = tc["test_type"]
+            by_type[t] = by_type.get(t, 0) + 1
+
+        total_count = len(sanitized_cases)
+        overview = summary_raw.get("overview") or f"Structured test suite verifying defect '{defect.get('title', 'Defect')}' across functional, edge, and regression scenarios."
+
+        return {
+            "summary": {
+                "total_count": total_count,
+                "by_type": by_type,
+                "overview": str(overview)
+            },
+            "test_cases": sanitized_cases
+        }
 
     def generate_test_cases(self, defect: dict) -> dict:
         """
         Generate structured, multi-perspective QA test cases for a defect with robust fallback.
         """
         if not self.client:
+            fallback_cases = self._build_fallback_test_cases(defect)
+            by_type = {}
+            for tc in fallback_cases:
+                by_type[tc["test_type"]] = by_type.get(tc["test_type"], 0) + 1
             return {
                 "summary": {
-                    "total_count": 0,
-                    "by_type": {},
-                    "overview": "AI service is currently unavailable. Please check API key configuration."
+                    "total_count": len(fallback_cases),
+                    "by_type": by_type,
+                    "overview": "AI service is currently unavailable. Displaying baseline defect test cases."
                 },
-                "test_cases": []
+                "test_cases": fallback_cases
             }
 
         title = defect.get("title", "Unknown")
@@ -307,7 +471,7 @@ Output ONLY valid JSON in this EXACT format:
         category = defect.get("category_name", "General")
         root_cause = defect.get("root_cause") or defect.get("ai_root_cause") or "Not determined yet"
 
-        system_msg = "You are an expert Lead Software QA Engineer. You must return ONLY a valid JSON object matching the requested schema. Do not output markdown fences, code blocks, or extra text."
+        system_msg = "You are an expert Lead Software QA Engineer. You must return ONLY a valid JSON object matching the requested schema. Both 'summary' and 'test_cases' keys are strictly required. Do not output markdown fences, code blocks, or extra text."
         user_prompt = f"""Analyze the following software defect and generate comprehensive, structured test cases for QA engineers.
 
 DEFECT DETAILS:
@@ -332,6 +496,7 @@ INSTRUCTIONS:
    - Concurrency / Security / Error Handling test cases (if relevant to the defect)
 3. Do NOT generate generic filler test cases. Every test must be directly tailored to this defect.
 4. Provide structured, step-by-step instructions with clear preconditions, sample test data, and precise expected results.
+5. Both 'summary' and 'test_cases' are required in the output JSON.
 
 Output ONLY valid JSON in this EXACT structure:
 {{
@@ -359,7 +524,7 @@ Output ONLY valid JSON in this EXACT structure:
   ]
 }}"""
 
-        # Attempt 1: with json_object response format
+        # Attempt 1: with json_object response format and high max_tokens for reasoning models
         try:
             response = self.client.chat.completions.create(
                 messages=[
@@ -368,9 +533,11 @@ Output ONLY valid JSON in this EXACT structure:
                 ],
                 model=self.model,
                 temperature=0.2,
+                max_tokens=8192,
                 response_format={"type": "json_object"}
             )
-            return self._parse_json(response.choices[0].message.content)
+            parsed = self._parse_json(response.choices[0].message.content)
+            return self._normalize_test_cases_response(parsed, defect)
         except Exception as e1:
             print(f"generate_test_cases attempt 1 failed: {e1}. Retrying without format constraint...")
             try:
@@ -381,19 +548,67 @@ Output ONLY valid JSON in this EXACT structure:
                         {"role": "user", "content": user_prompt}
                     ],
                     model=self.model,
-                    temperature=0.2
+                    temperature=0.2,
+                    max_tokens=8192
                 )
-                return self._parse_json(response.choices[0].message.content)
+                parsed = self._parse_json(response.choices[0].message.content)
+                return self._normalize_test_cases_response(parsed, defect)
             except Exception as e2:
                 print(f"generate_test_cases attempt 2 failed: {e2}")
+                fallback_cases = self._build_fallback_test_cases(defect)
+                by_type = {}
+                for tc in fallback_cases:
+                    by_type[tc["test_type"]] = by_type.get(tc["test_type"], 0) + 1
                 return {
                     "summary": {
-                        "total_count": 0,
-                        "by_type": {},
-                        "overview": "Failed to generate test cases. Please try again."
+                        "total_count": len(fallback_cases),
+                        "by_type": by_type,
+                        "overview": f"Baseline test suite generated for defect '{defect.get('title', 'Defect')}'."
                     },
-                    "test_cases": []
+                    "test_cases": fallback_cases
                 }
+
+    def _normalize_missing_scenarios_response(self, raw_data: dict, defect: dict) -> dict:
+        """Ensure the missing scenarios dictionary strictly conforms to MissingScenariosResponse schema."""
+        if not isinstance(raw_data, dict):
+            raw_data = {}
+
+        already_covered = raw_data.get("already_covered_summary")
+        if not isinstance(already_covered, list):
+            already_covered = [str(already_covered)] if already_covered else ["Primary defect reproduction"]
+
+        missing_raw = raw_data.get("missing_scenarios")
+        if not missing_raw:
+            for alt in ["scenarios", "missingScenarios", "edge_cases", "gaps"]:
+                if alt in raw_data and isinstance(raw_data[alt], list):
+                    missing_raw = raw_data[alt]
+                    break
+
+        sanitized_missing = []
+        if isinstance(missing_raw, list):
+            for m in missing_raw:
+                if not isinstance(m, dict):
+                    continue
+                scenario = str(m.get("scenario") or "Overlooked edge condition")
+                why = str(m.get("why_it_matters") or "Potential unhandled exception or data integrity issue")
+                risk = str(m.get("risk") or "Medium")
+                suggested = str(m.get("suggested_test") or "Validate edge behavior under adverse conditions")
+                priority = str(m.get("priority") or "Medium")
+                sanitized_missing.append({
+                    "scenario": scenario,
+                    "why_it_matters": why,
+                    "risk": risk,
+                    "suggested_test": suggested,
+                    "priority": priority
+                })
+
+        disclaimer = str(raw_data.get("disclaimer") or "These recommendations are AI-identified coverage gaps to assist QA testing and do not guarantee complete test coverage.")
+
+        return {
+            "already_covered_summary": [str(x) for x in already_covered],
+            "missing_scenarios": sanitized_missing,
+            "disclaimer": disclaimer
+        }
 
     def detect_missing_scenarios(self, defect: dict, existing_test_cases: list[dict] | None = None) -> dict:
         """
@@ -466,7 +681,7 @@ Output ONLY valid JSON in this EXACT structure:
   "disclaimer": "These recommendations are AI-identified coverage gaps to assist QA testing and do not guarantee complete test coverage."
 }}"""
 
-        # Attempt 1: with json_object format
+        # Attempt 1: with json_object format and max_tokens
         try:
             response = self.client.chat.completions.create(
                 messages=[
@@ -475,9 +690,11 @@ Output ONLY valid JSON in this EXACT structure:
                 ],
                 model=self.model,
                 temperature=0.2,
+                max_tokens=8192,
                 response_format={"type": "json_object"}
             )
-            return self._parse_json(response.choices[0].message.content)
+            parsed = self._parse_json(response.choices[0].message.content)
+            return self._normalize_missing_scenarios_response(parsed, defect)
         except Exception as e1:
             print(f"detect_missing_scenarios attempt 1 failed: {e1}. Retrying without format constraint...")
             try:
@@ -488,9 +705,11 @@ Output ONLY valid JSON in this EXACT structure:
                         {"role": "user", "content": user_prompt}
                     ],
                     model=self.model,
-                    temperature=0.2
+                    temperature=0.2,
+                    max_tokens=8192
                 )
-                return self._parse_json(response.choices[0].message.content)
+                parsed = self._parse_json(response.choices[0].message.content)
+                return self._normalize_missing_scenarios_response(parsed, defect)
             except Exception as e2:
                 print(f"detect_missing_scenarios attempt 2 failed: {e2}")
                 return {

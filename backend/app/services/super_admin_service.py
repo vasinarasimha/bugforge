@@ -531,7 +531,8 @@ class SuperAdminService:
         query = db.query(CustomizationRequest).options(
             joinedload(CustomizationRequest.company),
             joinedload(CustomizationRequest.requester),
-            joinedload(CustomizationRequest.reviewer)
+            joinedload(CustomizationRequest.reviewer),
+            joinedload(CustomizationRequest.linked_issue).joinedload(Issue.status)
         )
         if status_filter and status_filter.strip():
             query = query.filter(CustomizationRequest.status == status_filter.strip())
@@ -539,6 +540,9 @@ class SuperAdminService:
         requests = query.order_by(CustomizationRequest.created_at.desc()).all()
         results = []
         for r in requests:
+            impl_status = r.linked_issue.status.name if r.linked_issue and r.linked_issue.status else r.status
+            linked_key = r.linked_issue.issue_key if r.linked_issue else None
+            res_notes = r.linked_issue.resolution if r.linked_issue else None
             results.append(CustomizationRequestResponse(
                 id=r.id,
                 company_id=r.company_id,
@@ -547,6 +551,7 @@ class SuperAdminService:
                 requester_name=r.requester.full_name if r.requester else "Unknown",
                 title=r.title,
                 description=r.description,
+                request_type=getattr(r, 'request_type', 'Feature') or 'Feature',
                 category=r.category,
                 requested_behavior=r.requested_behavior,
                 status=r.status,
@@ -554,6 +559,10 @@ class SuperAdminService:
                 reviewed_by_id=r.reviewed_by_id,
                 reviewer_name=r.reviewer.full_name if r.reviewer else None,
                 reviewed_at=r.reviewed_at,
+                linked_issue_id=r.linked_issue_id,
+                linked_issue_key=linked_key,
+                implementation_status=impl_status,
+                resolution=res_notes,
                 created_at=r.created_at,
                 updated_at=r.updated_at,
             ))
@@ -564,7 +573,8 @@ class SuperAdminService:
     ) -> CustomizationRequestResponse:
         req = db.query(CustomizationRequest).options(
             joinedload(CustomizationRequest.company),
-            joinedload(CustomizationRequest.requester)
+            joinedload(CustomizationRequest.requester),
+            joinedload(CustomizationRequest.linked_issue).joinedload(Issue.status)
         ).filter(CustomizationRequest.id == request_id).first()
 
         if not req:
@@ -590,6 +600,10 @@ class SuperAdminService:
         db.commit()
         db.refresh(req)
 
+        impl_status = req.linked_issue.status.name if req.linked_issue and req.linked_issue.status else req.status
+        linked_key = req.linked_issue.issue_key if req.linked_issue else None
+        res_notes = req.linked_issue.resolution if req.linked_issue else None
+
         return CustomizationRequestResponse(
             id=req.id,
             company_id=req.company_id,
@@ -598,6 +612,7 @@ class SuperAdminService:
             requester_name=req.requester.full_name if req.requester else "Unknown",
             title=req.title,
             description=req.description,
+            request_type=getattr(req, 'request_type', 'Feature') or 'Feature',
             category=req.category,
             requested_behavior=req.requested_behavior,
             status=req.status,
@@ -605,9 +620,14 @@ class SuperAdminService:
             reviewed_by_id=req.reviewed_by_id,
             reviewer_name=current_user.full_name,
             reviewed_at=req.reviewed_at,
+            linked_issue_id=req.linked_issue_id,
+            linked_issue_key=linked_key,
+            implementation_status=impl_status,
+            resolution=res_notes,
             created_at=req.created_at,
             updated_at=req.updated_at,
         )
+
 
 
 super_admin_service = SuperAdminService()

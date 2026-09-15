@@ -130,6 +130,10 @@ class Issue(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     qa_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assigned_qa_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    developer_fixed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -139,6 +143,7 @@ class Issue(Base):
     project: Mapped["Project"] = relationship(back_populates="issues")
     reporter: Mapped["User"] = relationship(foreign_keys=[reporter_id], back_populates="reported_issues")
     assignee: Mapped["User | None"] = relationship(foreign_keys=[assigned_to], back_populates="assigned_issues")
+    assigned_qa: Mapped["User | None"] = relationship(foreign_keys=[assigned_qa_id], back_populates="assigned_qa_issues")
     requesting_company: Mapped["Company | None"] = relationship(foreign_keys=[requesting_company_id])
     team: Mapped["Team | None"] = relationship(foreign_keys=[team_id])
     qa_verified_by: Mapped["User | None"] = relationship(foreign_keys=[qa_verified_by_id])
