@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import UserCard from '../UserCard/UserCard'
 
@@ -12,6 +12,7 @@ const baseLinks = [
 
 export default function Sidebar({ open, onClose, onLogout }) {
   const { user } = useAuth()
+  const location = useLocation()
   const isSuperAdmin = user?.role === 'Super Admin' || user?.roles?.some((r) => r.name === 'Super Admin')
   const isCompanyAdmin = !isSuperAdmin && (user?.role === 'Admin' || user?.roles?.some((r) => r.name === 'Admin'))
 
@@ -69,6 +70,14 @@ export default function Sidebar({ open, onClose, onLogout }) {
               >
                 <i className="bi bi-envelope-paper-fill" />
                 <span>Customization Requests</span>
+              </NavLink>
+              <NavLink
+                to="/issues"
+                onClick={onClose}
+                className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
+              >
+                <i className="bi bi-bug-fill" />
+                <span>Reported Issues</span>
               </NavLink>
             </>
           ) : (

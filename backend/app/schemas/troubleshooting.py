@@ -21,6 +21,7 @@ class TroubleshootingStartRequest(BaseModel):
     category_id: int | None = Field(default=None, gt=0)
     module_id: int | None = Field(default=None, gt=0)
     assigned_to: int | None = Field(default=None, gt=0)
+    assigned_qa_id: int | None = Field(default=None, gt=0)
     environment: str | None = None
     browser: str | None = None
     operating_system: str | None = None
@@ -55,6 +56,7 @@ class TroubleshootingConfirmRequest(BaseModel):
     category_id: int | None = None
     module_id: int | None = None
     assigned_to: int | None = None
+    assigned_qa_id: int | None = None
     environment: str | None = None
     browser: str | None = None
     operating_system: str | None = None

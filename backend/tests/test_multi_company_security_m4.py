@@ -97,6 +97,11 @@ def test_setup(db_session: Session):
         )
         db_session.add(alpha_admin)
         db_session.flush()
+    else:
+        alpha_admin.company_id = alpha.id
+        alpha_admin.is_active = True
+        alpha_admin.roles = [admin_role] if admin_role else []
+        db_session.flush()
 
     alpha_user = db_session.query(User).filter(User.email == "dev@alpha.test").first()
     if not alpha_user:
@@ -109,6 +114,11 @@ def test_setup(db_session: Session):
             roles=[dev_role] if dev_role else []
         )
         db_session.add(alpha_user)
+        db_session.flush()
+    else:
+        alpha_user.company_id = alpha.id
+        alpha_user.is_active = True
+        alpha_user.roles = [dev_role] if dev_role else []
         db_session.flush()
 
     # Initialize Alpha Statuses
@@ -147,6 +157,11 @@ def test_setup(db_session: Session):
         )
         db_session.add(beta_admin)
         db_session.flush()
+    else:
+        beta_admin.company_id = beta.id
+        beta_admin.is_active = True
+        beta_admin.roles = [admin_role] if admin_role else []
+        db_session.flush()
 
     beta_user = db_session.query(User).filter(User.email == "dev@beta.test").first()
     if not beta_user:
@@ -159,6 +174,11 @@ def test_setup(db_session: Session):
             roles=[dev_role] if dev_role else []
         )
         db_session.add(beta_user)
+        db_session.flush()
+    else:
+        beta_user.company_id = beta.id
+        beta_user.is_active = True
+        beta_user.roles = [dev_role] if dev_role else []
         db_session.flush()
 
     beta_open_status = db_session.query(IssueStatus).filter(

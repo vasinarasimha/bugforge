@@ -89,7 +89,9 @@ export default function SearchableSelect({
   ...props
 }) {
   const selectId = useId()
-  const currentOption = options.find((opt) => opt.value === value) || null
+  const currentOption = options.find((opt) => 
+    opt.value === value || (value !== null && value !== undefined && value !== '' && String(opt.value) === String(value))
+  ) || null
 
   return (
     <Select

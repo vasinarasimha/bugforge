@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user, require_role
+from app.api.dependencies.auth import get_current_user, require_role, get_effective_company_id
 from app.core.database import get_db
 from app.models.user import User, UserRole
 from app.models.sprint import SprintStatus
@@ -61,7 +61,7 @@ async def list_sprints(
     user: Annotated[User, Depends(get_current_user)],
     project_id: Optional[int] = None,
 ):
-    return [serialize(s) for s in service.list(db, project_id, company_id=user.company_id)]
+    return [serialize(s) for s in service.list(db, project_id, company_id=get_effective_company_id(user))]
 
 
 @router.get("/{sprint_id}", response_model=SprintResponse)
@@ -70,7 +70,7 @@ async def get_sprint(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
-    return serialize(service.get(db, sprint_id, company_id=user.company_id))
+    return serialize(service.get(db, sprint_id, company_id=get_effective_company_id(user)))
 
 
 @router.post("", response_model=SprintResponse, status_code=status.HTTP_201_CREATED)

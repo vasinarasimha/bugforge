@@ -74,6 +74,7 @@ class TeamService:
         pm_id: Optional[int] = None,
         tl_id: Optional[int] = None,
         user_id: Optional[int] = None,
+        company_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         teams = self.team_repository.list_teams(
             db=db,
@@ -82,11 +83,12 @@ class TeamService:
             pm_id=pm_id,
             tl_id=tl_id,
             user_id=user_id,
+            company_id=company_id,
         )
         return [self.serialize_team(t) for t in teams]
 
-    def get_team(self, db: Session, team_id: int) -> Dict[str, Any]:
-        team = self.team_repository.get_by_id(db, team_id)
+    def get_team(self, db: Session, team_id: int, company_id: Optional[int] = None) -> Dict[str, Any]:
+        team = self.team_repository.get_by_id(db, team_id, company_id=company_id)
         if not team:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -94,9 +96,19 @@ class TeamService:
             )
         return self.serialize_team(team)
 
-    def create_team(self, db: Session, data: TeamCreate) -> Dict[str, Any]:
-        # Validate team name uniqueness
-        existing = self.team_repository.get_by_name(db, data.name)
+    def create_team(self, db: Session, data: TeamCreate, current_user: Optional[User] = None) -> Dict[str, Any]:
+        company_id = None
+        if current_user:
+            user_roles = [r.name for r in getattr(current_user, 'roles', [])]
+            if "Super Admin" in user_roles:
+                company_id = getattr(data, "company_id", None) or current_user.company_id or 1
+            else:
+                company_id = current_user.company_id or 1
+        else:
+            company_id = getattr(data, "company_id", None) or 1
+
+        # Validate team name uniqueness within company
+        existing = self.team_repository.get_by_name(db, data.name, company_id=company_id)
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -105,14 +117,14 @@ class TeamService:
 
         # Validate Team Leader
         if data.team_leader_id:
-            tl_user = self.user_repository.get_by_id(db, data.team_leader_id)
+            tl_user = self.user_repository.get_by_id(db, data.team_leader_id, company_id=company_id)
             if not tl_user or tl_user.is_system_user:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Selected Team Leader user does not exist or is invalid."
+                    detail="Selected Team Leader user does not exist or does not belong to your company."
                 )
-            # Check if this TL is already leading another active team
-            existing_team = self.team_repository.get_team_by_leader_id(db, data.team_leader_id)
+            # Check if this TL is already leading another active team within company
+            existing_team = self.team_repository.get_team_by_leader_id(db, data.team_leader_id, company_id=company_id)
             if existing_team:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -121,11 +133,11 @@ class TeamService:
 
         # Validate Project Manager (if provided)
         if data.project_manager_id:
-            pm_user = self.user_repository.get_by_id(db, data.project_manager_id)
+            pm_user = self.user_repository.get_by_id(db, data.project_manager_id, company_id=company_id)
             if not pm_user or pm_user.is_system_user:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Selected Project Manager user does not exist or is invalid."
+                    detail="Selected Project Manager user does not exist or does not belong to your company."
                 )
 
         team = Team(
@@ -134,14 +146,20 @@ class TeamService:
             team_leader_id=data.team_leader_id,
             project_manager_id=data.project_manager_id,
             is_active=data.is_active,
-            company_id=getattr(data, "company_id", None) or 1,
+            company_id=company_id,
         )
 
         created_team = self.team_repository.create(db, team, data.member_ids)
         return self.serialize_team(created_team)
 
-    def update_team(self, db: Session, team_id: int, data: TeamUpdate) -> Dict[str, Any]:
-        team = self.team_repository.get_by_id(db, team_id)
+    def update_team(self, db: Session, team_id: int, data: TeamUpdate, current_user: Optional[User] = None) -> Dict[str, Any]:
+        company_id = None
+        if current_user:
+            user_roles = [r.name for r in getattr(current_user, 'roles', [])]
+            if "Super Admin" not in user_roles:
+                company_id = current_user.company_id
+
+        team = self.team_repository.get_by_id(db, team_id, company_id=company_id)
         if not team:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -151,9 +169,9 @@ class TeamService:
         update_fields = {}
 
         if data.name is not None and data.name.strip():
-            # Check uniqueness if name changed
+            # Check uniqueness if name changed within team's company
             if data.name.strip().lower() != team.name.lower():
-                existing = self.team_repository.get_by_name(db, data.name.strip())
+                existing = self.team_repository.get_by_name(db, data.name.strip(), company_id=team.company_id)
                 if existing and existing.id != team_id:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -166,14 +184,14 @@ class TeamService:
 
         if data.team_leader_id is not None:
             if data.team_leader_id != team.team_leader_id:
-                tl_user = self.user_repository.get_by_id(db, data.team_leader_id)
+                tl_user = self.user_repository.get_by_id(db, data.team_leader_id, company_id=team.company_id)
                 if not tl_user or tl_user.is_system_user:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Selected Team Leader user does not exist or is invalid."
+                        detail="Selected Team Leader user does not exist or does not belong to this company."
                     )
-                # Check uniqueness across other teams
-                existing_team = self.team_repository.get_team_by_leader_id(db, data.team_leader_id)
+                # Check uniqueness across other teams in the same company
+                existing_team = self.team_repository.get_team_by_leader_id(db, data.team_leader_id, company_id=team.company_id)
                 if existing_team and existing_team.id != team_id:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -183,11 +201,11 @@ class TeamService:
 
         if data.project_manager_id is not None:
             if data.project_manager_id != team.project_manager_id:
-                pm_user = self.user_repository.get_by_id(db, data.project_manager_id)
+                pm_user = self.user_repository.get_by_id(db, data.project_manager_id, company_id=team.company_id)
                 if not pm_user or pm_user.is_system_user:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Selected Project Manager user does not exist or is invalid."
+                        detail="Selected Project Manager user does not exist or does not belong to this company."
                     )
             update_fields["project_manager_id"] = data.project_manager_id
 
@@ -197,8 +215,14 @@ class TeamService:
         updated_team = self.team_repository.update(db, team, update_fields, data.member_ids)
         return self.serialize_team(updated_team)
 
-    def deactivate_team(self, db: Session, team_id: int) -> Dict[str, Any]:
-        team = self.team_repository.get_by_id(db, team_id)
+    def deactivate_team(self, db: Session, team_id: int, current_user: Optional[User] = None) -> Dict[str, Any]:
+        company_id = None
+        if current_user:
+            user_roles = [r.name for r in getattr(current_user, 'roles', [])]
+            if "Super Admin" not in user_roles:
+                company_id = current_user.company_id
+
+        team = self.team_repository.get_by_id(db, team_id, company_id=company_id)
         if not team:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -210,8 +234,8 @@ class TeamService:
             "team": self.serialize_team(deactivated),
         }
 
-    def get_meta_available_leaders(self, db: Session, exclude_team_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        leaders = self.team_repository.get_available_team_leaders(db, exclude_team_id)
+    def get_meta_available_leaders(self, db: Session, exclude_team_id: Optional[int] = None, company_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        leaders = self.team_repository.get_available_team_leaders(db, exclude_team_id, company_id=company_id)
         return [
             {
                 "id": u.id,
@@ -223,10 +247,10 @@ class TeamService:
             for u in leaders
         ]
 
-    def get_meta_available_members(self, db: Session) -> List[Dict[str, Any]]:
-        employees = self.team_repository.get_all_eligible_employees(db)
-        # Find which team each employee currently belongs to
-        all_teams = self.team_repository.list_teams(db)
+    def get_meta_available_members(self, db: Session, company_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        employees = self.team_repository.get_all_eligible_employees(db, company_id=company_id)
+        # Find which team each employee currently belongs to within company
+        all_teams = self.team_repository.list_teams(db, company_id=company_id)
         user_team_map = {}
         user_lead_map = {}
         for t in all_teams:
@@ -257,7 +281,7 @@ class TeamService:
             )
         return result
 
-    def get_team_stats(self, db: Session) -> Dict[str, Any]:
+    def get_team_stats(self, db: Session, company_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Calculates high-level team management statistics & workforce telemetry:
         - Total and active team counts
@@ -266,37 +290,34 @@ class TeamService:
         - Count of unassigned employees
         - Total designated team leaders
         """
-        total_teams = db.query(func.count(Team.id)).scalar() or 0
-        active_teams = db.query(func.count(Team.id)).filter(Team.is_active == True).scalar() or 0
-        inactive_teams = max(0, total_teams - active_teams)
-
-        # Total real employees (excluding is_system_user == True accounts)
-        total_users = (
-            db.query(func.count(User.id))
-            .filter(User.is_system_user == False, User.is_active == True)
-            .scalar()
-            or 0
-        )
-
-        # Distinct real users assigned to at least one active team
-        assigned_members = (
+        team_q = db.query(func.count(Team.id))
+        active_team_q = db.query(func.count(Team.id)).filter(Team.is_active == True)
+        user_q = db.query(func.count(User.id)).filter(User.is_system_user == False, User.is_active == True)
+        assigned_q = (
             db.query(func.count(distinct(TeamMember.user_id)))
             .join(Team, Team.id == TeamMember.team_id)
             .join(User, User.id == TeamMember.user_id)
             .filter(Team.is_active == True, User.is_system_user == False, User.is_active == True)
-            .scalar()
-            or 0
         )
-
-        unassigned_users = max(0, total_users - assigned_members)
-
-        # Distinct active team leaders
-        total_leaders = (
+        leader_q = (
             db.query(func.count(distinct(Team.team_leader_id)))
             .filter(Team.is_active == True, Team.team_leader_id.isnot(None))
-            .scalar()
-            or 0
         )
+
+        if company_id is not None:
+            team_q = team_q.filter(Team.company_id == company_id)
+            active_team_q = active_team_q.filter(Team.company_id == company_id)
+            user_q = user_q.filter(User.company_id == company_id)
+            assigned_q = assigned_q.filter(Team.company_id == company_id)
+            leader_q = leader_q.filter(Team.company_id == company_id)
+
+        total_teams = team_q.scalar() or 0
+        active_teams = active_team_q.scalar() or 0
+        inactive_teams = max(0, total_teams - active_teams)
+        total_users = user_q.scalar() or 0
+        assigned_members = assigned_q.scalar() or 0
+        unassigned_users = max(0, total_users - assigned_members)
+        total_leaders = leader_q.scalar() or 0
 
         return {
             "total_teams": total_teams,

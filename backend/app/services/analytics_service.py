@@ -154,18 +154,19 @@ class AnalyticsService:
                 ))
 
             if team_id:
-                sel_team = db.query(Team).filter(Team.id == team_id).first()
+                sel_team_q = db.query(Team).filter(Team.id == team_id)
+                if current_user.company_id is not None and not is_super_admin:
+                    sel_team_q = sel_team_q.filter(Team.company_id == current_user.company_id)
+                sel_team = sel_team_q.first()
                 if sel_team:
                     target_team_name = _to_str(sel_team.name, "Team")
                     scope_title = f"{target_team_name} Analytics"
                     t_uids = [m.user_id for m in sel_team.members] + ([sel_team.team_leader_id] if sel_team.team_leader_id else [])
                     filters.append(or_(Issue.assigned_to.in_(t_uids), Issue.reporter_id.in_(t_uids)) if t_uids else (Issue.id == -1))
-
-            if project_id:
-                filters.append(Issue.project_id == project_id)
-                proj = db.query(Project).filter(Project.id == project_id).first()
-                if proj:
-                    target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
+                else:
+                    is_empty_scope = True
+                    empty_scope_message = "Team not found or access denied."
+                    filters.append(Issue.id == -1)
 
         elif primary_role == "Project Manager":
             # PM scope: Combined teams managed by PM
@@ -234,12 +235,6 @@ class AnalyticsService:
                         or_(Issue.assigned_to.in_(managed_user_ids), Issue.reporter_id.in_(managed_user_ids)) if managed_user_ids else (Issue.id == -1)
                     ]
 
-                if project_id:
-                    filters.append(Issue.project_id == project_id)
-                    proj = db.query(Project).filter(Project.id == project_id).first()
-                    if proj:
-                        target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
-
         elif primary_role == "Team Leader":
             # TL scope: Exactly one assigned team
             tl_team = db.query(Team).options(
@@ -263,23 +258,11 @@ class AnalyticsService:
                     or_(Issue.assigned_to.in_(tl_member_ids), Issue.reporter_id.in_(tl_member_ids))
                 ]
 
-                if project_id:
-                    filters.append(Issue.project_id == project_id)
-                    proj = db.query(Project).filter(Project.id == project_id).first()
-                    if proj:
-                        target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
-
         elif primary_role == "Developer":
             # Developer scope: Strictly assigned to this developer
             scope_type = "developer_personal"
             scope_title = "My Engineering Performance"
             filters = list(base_filters) + [Issue.assigned_to == current_user.id]
-
-            if project_id:
-                filters.append(Issue.project_id == project_id)
-                proj = db.query(Project).filter(Project.id == project_id).first()
-                if proj:
-                    target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
 
         elif primary_role == "QA":
             # QA scope: Quality assurance and defect verification across assigned team(s) / projects
@@ -326,23 +309,11 @@ class AnalyticsService:
                 scope_title = "Quality Assurance & Defect Telemetry"
                 filters = list(base_filters)
 
-            if project_id:
-                filters.append(Issue.project_id == project_id)
-                proj = db.query(Project).filter(Project.id == project_id).first()
-                if proj:
-                    target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
-
         elif primary_role == "Reporter":
             # Reporter scope: Issues reported by this reporter
             scope_type = "reporter_personal"
             scope_title = "My Reported Defects & Status"
             filters = list(base_filters) + [Issue.reporter_id == current_user.id]
-
-            if project_id:
-                filters.append(Issue.project_id == project_id)
-                proj = db.query(Project).filter(Project.id == project_id).first()
-                if proj:
-                    target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
 
         else:
             # Fallback for any other custom authenticated roles
@@ -352,11 +323,19 @@ class AnalyticsService:
                 or_(Issue.reporter_id == current_user.id, Issue.assigned_to == current_user.id)
             ]
 
-            if project_id:
+        # Universal Project Filter (Strictly Company-Scoped)
+        if project_id:
+            proj_q = db.query(Project).filter(Project.id == project_id)
+            if current_user.company_id is not None and not is_super_admin:
+                proj_q = proj_q.filter(Project.company_id == current_user.company_id)
+            proj = proj_q.first()
+            if proj:
+                target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
                 filters.append(Issue.project_id == project_id)
-                proj = db.query(Project).filter(Project.id == project_id).first()
-                if proj:
-                    target_project_name = _to_str(getattr(proj, "name", None), f"Project #{project_id}")
+            else:
+                is_empty_scope = True
+                empty_scope_message = "Project not found or access denied."
+                filters.append(Issue.id == -1)
 
         # ─────────────────────────────────────────────────────────────
         # 2. KPI AGGREGATIONS (Bounded by selected time filter)
@@ -486,14 +465,55 @@ class AnalyticsService:
             ))
 
         # ─────────────────────────────────────────────────────────────
-        # 6. STATUS DISTRIBUTION (Time-bounded)
+        # 6. STATUS DISTRIBUTION (Time-bounded, Company-scoped)
         # ─────────────────────────────────────────────────────────────
-        all_statuses = db.query(IssueStatus).filter(IssueStatus.is_active == True).all()
         stat_counts_raw = db.query(
             Issue.status_id,
             func.count(Issue.id)
         ).filter(*time_filters).group_by(Issue.status_id).all()
         stat_count_map = {row[0]: row[1] for row in stat_counts_raw}
+
+        # Resolve statuses strictly scoped to user's company
+        if current_user.company_id is not None and not is_super_admin:
+            comp_statuses = db.query(IssueStatus).filter(
+                IssueStatus.company_id == current_user.company_id,
+                IssueStatus.is_active == True
+            ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+
+            if comp_statuses:
+                all_statuses = comp_statuses
+            elif current_user.company_id == 1:
+                all_statuses = db.query(IssueStatus).filter(
+                    (IssueStatus.company_id == 1) | (IssueStatus.company_id.is_(None)),
+                    IssueStatus.is_active == True
+                ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+            else:
+                all_statuses = db.query(IssueStatus).filter(
+                    IssueStatus.company_id.is_(None),
+                    IssueStatus.is_active == True
+                ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+
+            # Include any status that actually has issues counted for this company
+            existing_sids = {s.id for s in all_statuses}
+            for sid in stat_count_map.keys():
+                if sid is not None and sid not in existing_sids:
+                    extra_st = db.query(IssueStatus).filter(IssueStatus.id == sid).first()
+                    if extra_st:
+                        all_statuses.append(extra_st)
+                        existing_sids.add(sid)
+        else:
+            # Super Admin platform view: show company 1 / global defaults plus any with counts
+            all_statuses = db.query(IssueStatus).filter(
+                (IssueStatus.company_id.is_(None)) | (IssueStatus.company_id == 1),
+                IssueStatus.is_active == True
+            ).order_by(IssueStatus.order_index.asc(), IssueStatus.id.asc()).all()
+            existing_sids = {s.id for s in all_statuses}
+            for sid in stat_count_map.keys():
+                if sid is not None and sid not in existing_sids:
+                    extra_st = db.query(IssueStatus).filter(IssueStatus.id == sid).first()
+                    if extra_st:
+                        all_statuses.append(extra_st)
+                        existing_sids.add(sid)
 
         status_distribution = []
         for st in all_statuses:
@@ -507,7 +527,7 @@ class AnalyticsService:
                 name=st_name,
                 count=count,
                 percentage=pct,
-                color=STATUS_COLORS.get(st_name, "#94a3b8")
+                color=getattr(st, "color", None) or STATUS_COLORS.get(st_name, "#94a3b8")
             ))
 
         # ─────────────────────────────────────────────────────────────
@@ -720,9 +740,14 @@ class AnalyticsService:
                 joinedload(Sprint.status),
                 joinedload(Sprint.project),
                 joinedload(Sprint.issues).joinedload(Issue.status)
-            ).join(Sprint.status).filter(
+            ).join(Sprint.status).join(Sprint.project).filter(
                 SprintStatusModel.name.in_(["Active", "Completed"])
-            ).order_by(Sprint.created_at.desc()).limit(10)
+            )
+
+            if current_user.company_id is not None and not is_super_admin:
+                sprints_query = sprints_query.filter(Project.company_id == current_user.company_id)
+
+            sprints_query = sprints_query.order_by(Sprint.created_at.desc()).limit(10)
 
             if project_id:
                 sprints_query = sprints_query.filter(Sprint.project_id == project_id)

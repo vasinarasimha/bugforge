@@ -130,10 +130,15 @@ export default function ProfilePage() {
             <div className="d-flex flex-column flex-sm-row align-items-start align-items-sm-center gap-3">
               {/* Floating Avatar */}
               <div
-                className="avatar shadow"
+                className="shadow"
                 style={{
                   width: '88px',
                   height: '88px',
+                  minWidth: '88px',
+                  minHeight: '88px',
+                  maxWidth: '88px',
+                  maxHeight: '88px',
+                  aspectRatio: '1 / 1',
                   borderRadius: '50%',
                   background: 'var(--primary, #2563eb)',
                   color: '#fff',
@@ -143,8 +148,12 @@ export default function ProfilePage() {
                   placeItems: 'center',
                   border: '4px solid #ffffff',
                   marginTop: '-44px',
+                  flex: '0 0 88px',
                   flexShrink: 0,
                   boxShadow: '0 4px 14px rgba(0, 0, 0, 0.12)',
+                  overflow: 'hidden',
+                  lineHeight: 1,
+                  textAlign: 'center',
                 }}
               >
                 {initials}

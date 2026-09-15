@@ -1,17 +1,19 @@
-import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
-import IssueTable from '../../components/IssueTable/IssueTable'
+import { useEffect, useState, useMemo } from 'react'
+import { useLocation, useSearchParams, useParams } from 'react-router-dom'
+import IssueTable, { isClientFeatureRequest } from '../../components/IssueTable/IssueTable'
 import Modal from '../../components/Modal/Modal'
+import Toast from '../../components/Toast/Toast'
 import TroubleshootingModal from '../../components/TroubleshootingModal/TroubleshootingModal'
 import IssueTimeline from '../../components/ActivityTimeline/IssueTimeline'
 import AITestIntelligence from '../../components/AITestIntelligence/AITestIntelligence'
+import SearchableSelect from '../../components/common/SearchableSelect'
 import { 
   getIssues, getStatuses, getPriorities, getSeverities, getCategories, getModules,
   createIssue, updateIssue, deleteIssue, uploadFile,
   getIssueAttachments, addIssueAttachment, deleteIssueAttachment,
-  getIssueHistory, getIssueComments, addIssueComment, updateIssueStatus, updateIssueAssignee,
+  getIssueHistory, getIssueComments, addIssueComment, updateIssueStatus, updateIssueAssignee, updateIssueQaAssignee,
   semanticSearch, getSimilarIssues, searchIssues, getIssue,
-  assignIssueTeam, qaVerifyIssue
+  assignIssueTeam, qaVerifyIssue, hybridSearch, extractErrorMessage
 } from '../../services/issueService'
 import { getSprints } from '../../services/sprintService'
 import { getProjects } from '../../services/projectService'
@@ -55,11 +57,14 @@ function SectionCard({ icon, title, children }) {
 export default function ReportedIssuesPage() {
   const { user } = useAuth()
   const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { id: routeIssueId } = useParams()
   const userRole = user?.role || user?.roles?.[0]?.name || ''
   const userRoles = user?.roles?.map(r => r.name) || [userRole]
   const canDeleteIssue = ['Admin', 'Super Admin', 'QA', 'Project Manager'].includes(userRole) || userRoles.some(r => ['Admin', 'Super Admin', 'QA', 'Project Manager'].includes(r))
   const canAccessTestIntelligence = userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
   const canAssignIssues = userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
+  const isSuperAdmin = userRoles.includes('Super Admin')
 
   const BACKEND_TO_FRONTEND_ISSUE_TYPE = {
     Defect: 'Bug',
@@ -71,7 +76,7 @@ export default function ReportedIssuesPage() {
     Task: 'Task',
     Feature: 'Feature'
   }
-  const empty = { title: '', description: '', project_id: '', priority_id: '', severity_id: '', category_id: '', module_id: '', status_id: '', assigned_to: null, issue_type: 'Bug', environment: '', browser: '', steps_to_reproduce: '', expected_behavior: '', actual_behavior: '', attachment_path: '', sprint_id: '' }
+  const empty = { title: '', description: '', project_id: '', priority_id: '', severity_id: '', category_id: '', module_id: '', status_id: '', assigned_to: null, assigned_qa_id: null, issue_type: 'Bug', environment: '', browser: '', steps_to_reproduce: '', expected_behavior: '', actual_behavior: '', attachment_path: '', sprint_id: '' }
 
   const [issues, setIssues] = useState([])
   const [statuses, setStatuses] = useState([])
@@ -98,17 +103,24 @@ export default function ReportedIssuesPage() {
   const [attachUploading, setAttachUploading] = useState(false)
   const [statusUpdating, setStatusUpdating] = useState(false)
   const [assigneeUpdating, setAssigneeUpdating] = useState(false)
+  const [qaAssigneeUpdating, setQaAssigneeUpdating] = useState(false)
+
+  // Scope filter tabs (All, Customer Requests, Needs Squad Assignment)
+  const [activeScopeTab, setActiveScopeTab] = useState(searchParams.get('filter') || 'all')
+  const [quickAssignIssue, setQuickAssignIssue] = useState(null)
+  const [quickTeamId, setQuickTeamId] = useState('')
+  const [toast, setToast] = useState({ message: '', variant: 'success' })
+
+  const bugforgeProject = allProjects.find(p => p.name === 'BugForge' || p.key === 'BF')
 
   // Semantic search state
   const [similarDefects, setSimilarDefects] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchTimeout, setSearchTimeout] = useState(null)
 
-  // Semantic search in list view
-  const [semanticQuery, setSemanticQuery] = useState('')
-  const [semanticResults, setSemanticResults] = useState([])
-  const [semanticSearchLoading, setSemanticSearchLoading] = useState(false)
-  const [searchMode, setSearchMode] = useState('keyword') // 'keyword' or 'semantic'
+  // Unified hybrid search in list view
+  const [hybridResults, setHybridResults] = useState(null)
+  const [hybridLoading, setHybridLoading] = useState(false)
 
   // Similar defects panel for detail view
   const [detailSimilarDefects, setDetailSimilarDefects] = useState([])
@@ -167,14 +179,44 @@ export default function ReportedIssuesPage() {
   }, [form.project_id])
 
   useEffect(() => {
+    const targetIssueId =
+      location.state?.issueId ||
+      location.state?.editIssueId ||
+      routeIssueId ||
+      searchParams.get('issueId') ||
+      searchParams.get('id')
+
     if (location.state?.editIssue && statuses.length) {
       open(location.state.editIssue)
+      window.history.replaceState({}, document.title)
+    } else if (targetIssueId && statuses.length) {
+      const found = issues.find(i => String(i.id) === String(targetIssueId))
+      if (found) {
+        open(found)
+      } else {
+        getIssue(targetIssueId)
+          .then(res => {
+            if (res.data) open(res.data)
+          })
+          .catch(err => {
+            console.error('Failed to load issue for notification:', err)
+          })
+      }
       window.history.replaceState({}, document.title)
     } else if (location.state?.openNewIssue && statuses.length) {
       open()
       window.history.replaceState({}, document.title)
     }
-  }, [location.state, statuses.length])
+  }, [location.state, routeIssueId, searchParams, statuses.length, issues])
+
+  useEffect(() => {
+    const f = searchParams.get('filter')
+    if (f) {
+      setActiveScopeTab(f)
+    } else {
+      setActiveScopeTab('all')
+    }
+  }, [searchParams])
 
   // Debounced semantic search for similar defects during creation / editing
   useEffect(() => {
@@ -223,26 +265,33 @@ export default function ReportedIssuesPage() {
     }
   }, [editing?.id, form.project_id, editing?.project_id])
 
-  // Debounced semantic search in list view
+  // Unified debounced hybrid search in list view (combining keyword and pgvector semantic search)
   useEffect(() => {
-    if (searchMode !== 'semantic' || !semanticQuery.trim() || semanticQuery.trim().length < 3) {
-      setSemanticResults([])
+    const trimmed = query.trim()
+    const projId = project ? Number(project) : null
+    const matchedStatus = statuses.find(s => s.name?.toLowerCase() === status.toLowerCase() || String(s.id) === String(status))
+    const statusId = matchedStatus ? matchedStatus.id : (status ? Number(status) : null)
+
+    if (!trimmed) {
+      setHybridResults(null)
+      setHybridLoading(false)
       return
     }
+
+    setHybridLoading(true)
     const timer = setTimeout(async () => {
-      setSemanticSearchLoading(true)
       try {
-        const projId = project ? Number(project) : null
-        const { data } = await semanticSearch(semanticQuery, projId)
-        setSemanticResults(data || [])
-      } catch {
-        setSemanticResults([])
+        const res = await hybridSearch(trimmed, projId, statusId)
+        setHybridResults(res.data || [])
+      } catch (err) {
+        console.warn('Hybrid search failed, falling back to local filtering:', err)
+        setHybridResults(null)
       } finally {
-        setSemanticSearchLoading(false)
+        setHybridLoading(false)
       }
-    }, 600)
+    }, 350)
     return () => clearTimeout(timer)
-  }, [semanticQuery, searchMode, project])
+  }, [query, project, status, statuses])
 
   const open = (issue = null) => {
     // Reset resolution assistance and QA intelligence when opening a new issue or switching issues
@@ -263,6 +312,7 @@ export default function ReportedIssuesPage() {
           module_id: issue.module_id,
           status_id: issue.status_id,
           assigned_to: issue.assigned_to,
+          assigned_qa_id: issue.assigned_qa_id || null,
           issue_type: issue.issue_type ? BACKEND_TO_FRONTEND_ISSUE_TYPE[issue.issue_type] : 'Bug',
           environment: issue.environment || '',
           browser: issue.browser || '',
@@ -274,7 +324,7 @@ export default function ReportedIssuesPage() {
           attachment_path: issue.attachment_path || '',
           sprint_id: issue.sprint_id || ''
         }
-      : { ...empty, status_id: openStatusId }
+      : { ...empty, status_id: openStatusId, project_id: allProjects[0]?.id || '' }
     )
     setFile(null)
     setAttachments([])
@@ -444,6 +494,29 @@ export default function ReportedIssuesPage() {
     }
   }
 
+  const handleImmediateQaAssigneeChange = async (nextQaId) => {
+    const parsedId = nextQaId ? Number(nextQaId) : null
+    if (!editing) {
+      setForm(prev => ({ ...prev, assigned_qa_id: parsedId }))
+      return
+    }
+
+    setQaAssigneeUpdating(true)
+    setError('')
+    try {
+      await updateIssueQaAssignee(editing.id, { assigned_qa_id: parsedId })
+      const assignedQaUser = allUsers.find(u => String(u.id) === String(parsedId))
+      setForm(prev => ({ ...prev, assigned_qa_id: parsedId }))
+      setEditing(prev => ({ ...prev, assigned_qa_id: parsedId, assigned_qa_name: assignedQaUser?.full_name || null }))
+      setIssues(prev => prev.map(iss => iss.id === editing.id ? { ...iss, assigned_qa_id: parsedId, assigned_qa_name: assignedQaUser?.full_name || null } : iss))
+    } catch (err) {
+      console.error("Failed to update QA assignee immediately:", err)
+      setError(err.response?.data?.detail || 'Failed to update QA assignee.')
+    } finally {
+      setQaAssigneeUpdating(false)
+    }
+  }
+
   const handleAssignTeam = async () => {
     if (!editing || !selectedTeamId) return
     setAssigningTeam(true)
@@ -451,6 +524,8 @@ export default function ReportedIssuesPage() {
     try {
       const res = await assignIssueTeam(editing.id, { team_id: Number(selectedTeamId) })
       const updatedIssue = res.data
+      const assignedTeam = internalTeams.find(t => String(t.id) === String(selectedTeamId))
+      const teamName = assignedTeam ? assignedTeam.name : (updatedIssue.team_name || 'the squad')
       setEditing(prev => ({
         ...prev,
         team_id: updatedIssue.team_id,
@@ -465,9 +540,15 @@ export default function ReportedIssuesPage() {
         status_id: updatedIssue.status_id,
         status_name: updatedIssue.status_name,
       } : iss))
+      setToast({
+        message: `Customization request assigned to squad "${teamName}" successfully.`,
+        variant: 'success'
+      })
     } catch (err) {
       console.error("Failed to assign team:", err)
-      setError(err.response?.data?.detail || 'Failed to assign team.')
+      const errorMsg = extractErrorMessage(err, 'Failed to assign team.')
+      setError(errorMsg)
+      setToast({ message: errorMsg, variant: 'error' })
     } finally {
       setAssigningTeam(false)
     }
@@ -547,6 +628,7 @@ export default function ReportedIssuesPage() {
         issue_type: backendIssueType,
         project_id: form.project_id ? Number(form.project_id) : defaultProjectId,
         assigned_to: form.assigned_to ? Number(form.assigned_to) : null,
+        assigned_qa_id: form.assigned_qa_id ? Number(form.assigned_qa_id) : null,
         attachment_path: currentAttachment,
         status_id: form.status_id ? Number(form.status_id) : defaultStatusId,
         priority_id: form.priority_id ? Number(form.priority_id) : defaultPriorityId,
@@ -630,11 +712,50 @@ export default function ReportedIssuesPage() {
   }
   const cancelDelete = () => { setShowDeleteModal(false); setDeleteTarget(null) }
 
-  const filtered = issues.filter((issue) =>
-    (!status || String(issue.status_id) === String(status)) &&
-    (!project || String(issue.project_id) === project) &&
-    (`${issue.id} ${issue.title}`.toLowerCase().includes(query.toLowerCase()))
-  )
+  const customerRequestsCount = useMemo(() => {
+    return issues.filter(i => isClientFeatureRequest(i) || i.requesting_company_id || i.issue_type === 'Feature').length
+  }, [issues])
+
+  const unassignedSquadCount = useMemo(() => {
+    return issues.filter(i => (isClientFeatureRequest(i) || i.requesting_company_id || i.issue_type === 'Feature') && !i.team_id).length
+  }, [issues])
+
+  const statusFilterOptions = useMemo(() => {
+    const seen = new Set()
+    const opts = []
+    for (const s of statuses) {
+      const nameKey = (s.name || '').trim().toLowerCase()
+      if (!nameKey || seen.has(nameKey)) continue
+      seen.add(nameKey)
+      opts.push({ value: s.name, label: s.name })
+    }
+    return opts
+  }, [statuses])
+
+  const filtered = useMemo(() => {
+    let list = hybridResults !== null ? hybridResults : issues.filter((issue) => {
+      const matchStatus =
+        !status ||
+        String(issue.status_name || '').toLowerCase() === String(status).toLowerCase() ||
+        String(issue.status_id) === String(status)
+      const matchProject = !project || String(issue.project_id) === String(project)
+      const qLower = query.toLowerCase().trim()
+      const matchQuery = !qLower ||
+        `${issue.key || issue.issue_key || ''} ${issue.title || ''} ${issue.description || ''}`
+          .toLowerCase()
+          .includes(qLower)
+      return matchStatus && matchProject && matchQuery
+
+    })
+
+    if (activeScopeTab === 'customer_requests') {
+      list = list.filter(i => isClientFeatureRequest(i) || i.requesting_company_id || i.issue_type === 'Feature')
+    } else if (activeScopeTab === 'unassigned_squad') {
+      list = list.filter(i => (isClientFeatureRequest(i) || i.requesting_company_id || i.issue_type === 'Feature') && !i.team_id)
+    }
+
+    return list
+  }, [hybridResults, issues, status, project, query, activeScopeTab])
 
   const isFormClosedAndReadOnly = editing && (statuses.find(s => String(s.id) === String(editing.status_id))?.name === 'Closed') && !userRoles.includes('Admin') && !userRoles.includes('Super Admin')
   const canSubmit = form.title?.trim() && form.description?.trim() && form.description?.trim().length >= 20 && !uploading && !isFormClosedAndReadOnly
@@ -963,114 +1084,90 @@ export default function ReportedIssuesPage() {
       {/* ── LIST VIEW ── */}
       {!showForm && (
         <section className="panel-card" style={{ animation: 'fadeSlideUp .5s ease .1s both' }}>
-          <div className="issue-filters">
-            <div className="search-input" style={{ position: 'relative', flex: 1 }}>
-              <span className="input-group-text" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 }}>
-                <i className={searchMode === 'semantic' ? 'bi bi-stars' : 'bi bi-search'} />
+          {/* Quick Scope Filter Tabs for Super Admin / Team Assignment */}
+          <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+            <div className="btn-group btn-group-sm p-1 bg-light rounded-3 border">
+              <button
+                type="button"
+                className={`btn btn-sm ${activeScopeTab === 'all' ? 'btn-white bg-white text-dark shadow-xs font-semibold' : 'text-muted border-0'}`}
+                onClick={() => { setActiveScopeTab('all'); setSearchParams({}) }}
+              >
+                All Issues ({issues.length})
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${activeScopeTab === 'customer_requests' ? 'btn-white bg-white text-primary shadow-xs font-semibold' : 'text-muted border-0'}`}
+                onClick={() => { setActiveScopeTab('customer_requests'); setSearchParams({ filter: 'customer_requests' }) }}
+              >
+                <i className="bi bi-stars me-1 text-primary" />Customer Requests ({customerRequestsCount})
+              </button>
+              {unassignedSquadCount > 0 && (
+                <button
+                  type="button"
+                  className={`btn btn-sm ${activeScopeTab === 'unassigned_squad' ? 'btn-white bg-white text-danger shadow-xs font-semibold' : 'text-muted border-0'}`}
+                  onClick={() => { setActiveScopeTab('unassigned_squad'); setSearchParams({ filter: 'unassigned_squad' }) }}
+                >
+                  <i className="bi bi-exclamation-triangle-fill me-1 text-danger" />Needs Squad ({unassignedSquadCount})
+                </button>
+              )}
+            </div>
+
+            {activeScopeTab !== 'all' && (
+              <span className="text-xs text-muted">
+                Showing <strong>{filtered.length}</strong> {activeScopeTab === 'unassigned_squad' ? 'requests needing squad assignment' : 'customer feature requests'}
               </span>
-              {searchMode === 'keyword' ? (
-                <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Search by ID or title…" value={query} autoComplete="off" onChange={(e) => setQuery(e.target.value)} />
-              ) : (
-                <input className="form-control" style={{ paddingLeft: '60px' }} placeholder="Semantic search — describe the issue in natural language…" value={semanticQuery} autoComplete="off" onChange={(e) => setSemanticQuery(e.target.value)} />
-              )}
-            </div>
-            {/* Search mode toggle */}
-            <div className="issue-filters-toggle" style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: '1.5px solid rgba(15,23,42,0.10)' }}>
-              <button
-                type="button"
-                onClick={() => { setSearchMode('keyword'); setSemanticResults([]); setSemanticQuery('') }}
-                style={{
-                  padding: '8px 14px', border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
-                  background: searchMode === 'keyword' ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : '#fff',
-                  color: searchMode === 'keyword' ? '#fff' : '#64748b', transition: 'all .2s'
-                }}
-              >🔍 Keyword</button>
-              <button
-                type="button"
-                onClick={() => { setSearchMode('semantic'); setQuery('') }}
-                style={{
-                  padding: '8px 14px', border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600,
-                  background: searchMode === 'semantic' ? 'linear-gradient(135deg, #8b5cf6, #6366f1)' : '#fff',
-                  color: searchMode === 'semantic' ? '#fff' : '#64748b', transition: 'all .2s'
-                }}
-              >✨ Semantic</button>
-            </div>
-            <select className="if-select" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">All statuses</option>
-              {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <select
-              className="if-select"
-              value={project}
-              onChange={(e) => setProject(e.target.value)}
-              placeholder="All projects"
-            >
-              <option value="">All projects</option>
-              {allProjects.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            )}
           </div>
-          {error && <div className="alert alert-danger">{error}</div>}
 
-          {/* Semantic search results */}
-          {searchMode === 'semantic' && semanticQuery.trim().length >= 3 && (
-            <div style={{ padding: '16px 20px' }}>
-              {semanticSearchLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#94a3b8', fontSize: '0.88rem' }}>
-                  <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16 }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
-                  Searching semantically…
-                </div>
-              ) : semanticResults.length > 0 ? (
-                <div>
-                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: '12px' }}>
-                    ✨ {semanticResults.length} Semantic Result{semanticResults.length !== 1 ? 's' : ''}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {semanticResults.map(r => (
-                      <div key={r.id}
-                        onClick={async () => { 
-                          try {
-                             const issueId = r.id || r.issue?.id;
-                             if (!issueId) return;
-                             const res = await getIssue(issueId);
-                             if (res.data) open(res.data);
-                          } catch (e) {
-                             console.error("Failed to open semantic search issue", e);
-                             setError("Failed to open defect details.");
-                          }
-                        }}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
-                          borderRadius: '12px', border: '1px solid rgba(15,23,42,0.07)', background: '#fff',
-                          cursor: 'pointer', transition: 'all .2s'
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(15,23,42,0.08)'}
-                        onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
-                      >
-                        <span style={{
-                          padding: '3px 8px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700,
-                          background: r.similarity_label === 'Potential Duplicate' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
-                          color: r.similarity_label === 'Potential Duplicate' ? '#dc2626' : '#d97706'
-                        }}>{r.similarity_percent}%</span>
-                        <span style={{ fontWeight: 600, color: '#3b82f6', fontSize: '0.82rem', flexShrink: 0 }}>{r.issue_key}</span>
-                        <span style={{ flex: 1, fontWeight: 500, color: '#0f172a', fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</span>
-                        <span style={{ padding: '2px 8px', borderRadius: '6px', background: '#f1f5f9', color: '#64748b', fontSize: '0.72rem', fontWeight: 600 }}>{r.status_name}</span>
-                        <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>{r.similarity_label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ color: '#94a3b8', fontSize: '0.88rem' }}>No semantic matches found for "{semanticQuery}"</div>
-              )}
+          <div className="issue-filters" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="search-input" style={{ position: 'relative', flex: 1, minWidth: '280px' }}>
+              <span className="input-group-text" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 }}>
+                {hybridLoading ? (
+                  <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16 }} fill="none" stroke="#3b82f6" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
+                ) : (
+                  <i className="bi bi-search" />
+                )}
+              </span>
+              <input
+                className="form-control"
+                style={{ paddingLeft: '44px', height: '42px', borderRadius: '8px' }}
+                placeholder="Search issues by ID, title, or describe problem in natural language…"
+                value={query}
+                autoComplete="off"
+                onChange={(e) => setQuery(e.target.value)}
+              />
             </div>
-          )}
+            <div style={{ minWidth: '180px' }}>
+              <SearchableSelect
+                placeholder="All Statuses"
+                isClearable
+                options={statusFilterOptions}
+                value={status || null}
+                onChange={(val) => setStatus(val ? String(val) : '')}
+              />
+            </div>
+            <div style={{ minWidth: '200px' }}>
+              <SearchableSelect
+                placeholder="All Projects"
+                isClearable
+                options={allProjects.map(p => ({ value: p.id, label: p.name }))}
+                value={project ? Number(project) : null}
+                onChange={(val) => setProject(val ? String(val) : '')}
+              />
+            </div>
+          </div>
+          {error && <div className="alert alert-danger mt-3">{error}</div>}
 
-          {/* Normal keyword results */}
-          {searchMode === 'keyword' && <IssueTable issues={filtered} onEdit={open} onDelete={remove} canDelete={canDeleteIssue} />}
+          <IssueTable
+            issues={filtered}
+            onEdit={open}
+            onDelete={remove}
+            canDelete={canDeleteIssue}
+            onAssignTeam={isSuperAdmin ? (iss) => {
+              setQuickAssignIssue(iss)
+              setQuickTeamId(iss.team_id || '')
+            } : null}
+          />
         </section>
       )}
 
@@ -1080,8 +1177,9 @@ export default function ReportedIssuesPage() {
 
           {/* Top bar */}
           <div className="if-topbar">
-            {editing && <span className="if-id-badge"><i className="bi bi-hash" />Issue #{editing.id}</span>}
+            {editing && <span className="if-id-badge"><i className="bi bi-tag" />{editing.issue_key || 'Issue Details'}</span>}
             <div>
+
               {/* <div className="if-topbar-title">{editing ? editing.title : 'Create New Issue'}</div> */}
               <div className="if-topbar-sub">{editing ? 'Edit issue details and activity below' : 'Document a new defect, task, or feature request'}</div>
             </div>
@@ -1162,8 +1260,9 @@ export default function ReportedIssuesPage() {
                         flexShrink: 0,
                       }}>{simPercent}%</span>
                       <span style={{ fontWeight: 700, color: '#3b82f6', fontSize: '0.82rem', flexShrink: 0 }}>
-                        {item.issue_key || `#${item.id}`}
+                        {item.issue_key || '—'}
                       </span>
+
                       <span style={{ flex: 1, fontWeight: 500, color: '#0f172a', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {item.title}
                       </span>
@@ -1219,20 +1318,14 @@ export default function ReportedIssuesPage() {
                 {/* Classification */}
                 <SectionCard icon="🏷️" title="Classification">
                   <div className="if-grid-2">
-                    <FieldGroup label="Project" required>
-                      <select className="if-select"
-                        required
-                        value={form.project_id || ''}
-                        onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                    <FieldGroup label="Project" required hint={!isSuperAdmin && form.issue_type === 'Feature' ? 'Client feature requests are assigned to BugForge' : undefined}>
+                      <SearchableSelect
                         placeholder="Select a project..."
-                      >
-                        <option value="">Select a project...</option>
-                        {allProjects.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
+                        options={allProjects.map(p => ({ value: p.id, label: p.name }))}
+                        value={form.project_id || null}
+                        isDisabled={!isSuperAdmin && form.issue_type === 'Feature'}
+                        onChange={(val) => setForm({ ...form, project_id: val })}
+                      />
                     </FieldGroup>
                     <FieldGroup label="Status" required>
                       {(() => {
@@ -1240,9 +1333,16 @@ export default function ReportedIssuesPage() {
                         if (canChangeStatus) {
                           return (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <select required className="if-select" value={form.status_id || ''} disabled={statusUpdating} onChange={e => handleImmediateStatusChange(e.target.value)}>
-                                {statuses.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                              </select>
+                              <div style={{ flex: 1 }}>
+                                <SearchableSelect
+                                  placeholder="Select status..."
+                                  options={statuses.map(v => ({ value: v.id, label: v.name }))}
+                                  value={form.status_id || null}
+                                  isDisabled={statusUpdating}
+                                  isClearable={false}
+                                  onChange={val => handleImmediateStatusChange(val)}
+                                />
+                              </div>
                               {statusUpdating && (
                                 <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16, flexShrink: 0 }} fill="none" stroke="#3b82f6" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
                               )}
@@ -1294,7 +1394,14 @@ export default function ReportedIssuesPage() {
                           key={t.value} type="button"
                           className={`if-type-chip${form.issue_type === t.value ? ' active' : ''}`}
                           style={form.issue_type === t.value ? { background: t.bg, color: t.color, borderColor: t.color } : {}}
-                          onClick={() => setForm({ ...form, issue_type: t.value })}
+                          onClick={() => {
+                            const newType = t.value
+                            let nextProjectId = form.project_id
+                            if (newType === 'Feature' && !isSuperAdmin && bugforgeProject) {
+                              nextProjectId = bugforgeProject.id
+                            }
+                            setForm({ ...form, issue_type: newType, project_id: nextProjectId })
+                          }}
                         >
                           <span>{t.icon}</span> {t.value}
                         </button>
@@ -1305,64 +1412,106 @@ export default function ReportedIssuesPage() {
                   {isBug ? (
                     <div className="if-grid-2">
                       <FieldGroup label="Priority" required>
-                        <select required className="if-select" value={form.priority_id || ''} onChange={e => setForm({ ...form, priority_id: e.target.value })}>
-                          <option value="">Select priority…</option>
-                          {priorities.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          placeholder="Select priority…"
+                          options={priorities.map(v => ({ value: v.id, label: v.name }))}
+                          value={form.priority_id || null}
+                          isClearable={false}
+                          onChange={val => setForm({ ...form, priority_id: val })}
+                        />
                       </FieldGroup>
                       <FieldGroup label="Severity" required>
-                        <select required className="if-select" value={form.severity_id || ''} onChange={e => setForm({ ...form, severity_id: e.target.value })}>
-                          <option value="">Select severity…</option>
-                          {severities.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          placeholder="Select severity…"
+                          options={severities.map(v => ({ value: v.id, label: v.name }))}
+                          value={form.severity_id || null}
+                          isClearable={false}
+                          onChange={val => setForm({ ...form, severity_id: val })}
+                        />
                       </FieldGroup>
                     </div>
                   ) : (
                     <div className="if-grid-1" style={{ marginBottom: '12px' }}>
                       <FieldGroup label="Priority" required hint="Set priority urgency for this task / feature">
-                        <select required className="if-select" value={form.priority_id || ''} onChange={e => setForm({ ...form, priority_id: e.target.value })}>
-                          <option value="">Select priority…</option>
-                          {priorities.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          placeholder="Select priority…"
+                          options={priorities.map(v => ({ value: v.id, label: v.name }))}
+                          value={form.priority_id || null}
+                          isClearable={false}
+                          onChange={val => setForm({ ...form, priority_id: val })}
+                        />
                       </FieldGroup>
                     </div>
                   )}
-                  
-                  <div className="if-grid-2">
-                    <FieldGroup label="Sprint" hint="Assign this issue to an active sprint.">
-                      <select className="if-select"
-                        value={form.sprint_id || ''}
-                        onChange={(e) => setForm({ ...form, sprint_id: e.target.value })}
-                        placeholder="No sprint - Backlog"
-                        disabled={userRoles.includes('Developer') || userRoles.includes('QA') || userRoles.includes('Reporter')}
-                      >
-                        <option value="">No sprint - Backlog</option>
-                        {projectSprints.map(s => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
+
+                  <div className="if-grid-2" style={{ marginBottom: '12px' }}>
+                    <FieldGroup label="Category" hint="Classification area (e.g., UI, Backend, API)">
+                      <SearchableSelect
+                        placeholder="Select category…"
+                        isClearable
+                        options={categories.map(c => ({ value: c.id, label: c.name }))}
+                        value={form.category_id || null}
+                        onChange={val => setForm({ ...form, category_id: val })}
+                      />
                     </FieldGroup>
-                    <FieldGroup label="Assignee" hint="Who should resolve this issue?">
+                    <FieldGroup label="Module / Component" hint="Affected subsystem or module">
+                      <SearchableSelect
+                        placeholder="Select module…"
+                        isClearable
+                        options={modules.map(m => ({ value: m.id, label: m.name }))}
+                        value={form.module_id || null}
+                        onChange={val => setForm({ ...form, module_id: val })}
+                      />
+                    </FieldGroup>
+                  </div>
+                  
+                  <div className="if-grid-2" style={{ marginBottom: '12px' }}>
+                    <FieldGroup label="Assign Developer" hint="Developer who should resolve this issue">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <select className="if-select"
-                          value={form.assigned_to || ''}
-                          onChange={(e) => handleImmediateAssigneeChange(e.target.value)}
-                          placeholder="Unassigned"
-                          disabled={assigneeUpdating || userRoles.includes('Developer') || userRoles.includes('QA') || userRoles.includes('Reporter')}
-                        >
-                          <option value="">Unassigned</option>
-                          {allUsers.filter(u => u.roles && u.roles.some(r => r.name === 'Developer')).map(u => (
-                            <option key={u.id} value={u.id}>
-                              {u.full_name}
-                            </option>
-                          ))}
-                        </select>
+                        <div style={{ flex: 1 }}>
+                          <SearchableSelect
+                            placeholder="Unassigned Developer"
+                            isClearable
+                            options={allUsers.filter(u => u.roles && u.roles.some(r => r.name === 'Developer')).map(u => ({ value: u.id, label: u.full_name }))}
+                            value={form.assigned_to || null}
+                            isDisabled={assigneeUpdating || userRoles.includes('Developer') || userRoles.includes('QA') || userRoles.includes('Reporter')}
+                            onChange={val => handleImmediateAssigneeChange(val)}
+                          />
+                        </div>
                         {assigneeUpdating && (
                           <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16, flexShrink: 0 }} fill="none" stroke="#3b82f6" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
                         )}
                       </div>
+                    </FieldGroup>
+                    <FieldGroup label="Assign QA" hint="QA engineer to test and verify the fix">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ flex: 1 }}>
+                          <SearchableSelect
+                            placeholder="Unassigned QA"
+                            isClearable
+                            options={allUsers.filter(u => u.roles && u.roles.some(r => r.name === 'QA')).map(u => ({ value: u.id, label: u.full_name }))}
+                            value={form.assigned_qa_id || null}
+                            isDisabled={qaAssigneeUpdating || userRoles.includes('Developer') || userRoles.includes('Reporter')}
+                            onChange={val => handleImmediateQaAssigneeChange(val)}
+                          />
+                        </div>
+                        {qaAssigneeUpdating && (
+                          <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16, flexShrink: 0 }} fill="none" stroke="#3b82f6" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
+                        )}
+                      </div>
+                    </FieldGroup>
+                  </div>
+
+                  <div className="if-grid-2">
+                    <FieldGroup label="Sprint" hint="Assign this issue to an active sprint.">
+                      <SearchableSelect
+                        placeholder="No sprint - Backlog"
+                        isClearable
+                        options={projectSprints.map(s => ({ value: s.id, label: s.name }))}
+                        value={form.sprint_id || null}
+                        isDisabled={userRoles.includes('Developer') || userRoles.includes('QA') || userRoles.includes('Reporter')}
+                        onChange={val => setForm({ ...form, sprint_id: val })}
+                      />
                     </FieldGroup>
                   </div>
                 </SectionCard>
@@ -1391,19 +1540,16 @@ export default function ReportedIssuesPage() {
                       <FieldGroup label="Assigned Internal Team" hint="BugForge squad responsible for implementation">
                         {userRoles.includes('Super Admin') ? (
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            <select
-                              className="if-select"
-                              value={selectedTeamId || ''}
-                              onChange={(e) => setSelectedTeamId(e.target.value)}
-                              disabled={assigningTeam}
-                            >
-                              <option value="">Select internal squad...</option>
-                              {internalTeams.map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  {t.name}
-                                </option>
-                              ))}
-                            </select>
+                            <div style={{ flex: 1 }}>
+                              <SearchableSelect
+                                placeholder="Select internal squad..."
+                                isClearable
+                                options={internalTeams.map(t => ({ value: t.id, label: t.name }))}
+                                value={selectedTeamId || null}
+                                isDisabled={assigningTeam}
+                                onChange={val => setSelectedTeamId(val || '')}
+                              />
+                            </div>
                             <button
                               type="button"
                               className="btn btn-sm btn-primary flex-shrink-0"
@@ -1612,12 +1758,12 @@ export default function ReportedIssuesPage() {
                         return (
                           <div key={att.id} className="att-card">
                             {isImage
-                              ? <img className="att-thumb" src={`http://localhost:8000${att.file_path}`} alt={att.filename} />
+                              ? <img className="att-thumb" src={`${att.file_path}`} alt={att.filename} />
                               : <div className="att-icon">{fileExt === 'PDF' ? '📄' : fileExt === 'MP4' || fileExt === 'MOV' ? '🎥' : fileExt === 'ZIP' ? '🗜️' : '📁'}</div>
                             }
                             <div className="att-name">{att.filename}</div>
                             {sizeKb && <div className="att-size">{sizeKb}</div>}
-                            <a className="att-link" href={`http://localhost:8000${att.file_path}`} target="_blank" rel="noreferrer">Open ↗</a>
+                            <a className="att-link" href={`${att.file_path}`} target="_blank" rel="noreferrer">Open ↗</a>
                             <button className="att-del" type="button" title="Delete attachment"
                               onClick={async () => {
                                 try {
@@ -2013,6 +2159,124 @@ export default function ReportedIssuesPage() {
           onClose={() => setShowTroubleshootingModal(false)}
         />
       )}
+
+      {/* Quick Assign Squad Modal (Super Admin) */}
+      {quickAssignIssue && (
+        <Modal
+          title="Assign Customer Request to Internal Squad"
+          onClose={() => { setQuickAssignIssue(null); setQuickTeamId('') }}
+        >
+          <div className="p-1">
+            <div className="p-3 mb-3 border rounded-3 bg-light text-xs">
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <span className="badge bg-primary px-2 py-1 font-mono">
+                  {quickAssignIssue.issue_key || 'Customer Request'}
+                </span>
+
+                <span className="badge bg-secondary-subtle text-secondary border">
+                  {quickAssignIssue.status_name}
+                </span>
+              </div>
+              <h6 className="font-bold text-slate-900 mb-1" style={{ fontSize: '0.95rem' }}>
+                {quickAssignIssue.title}
+              </h6>
+              {quickAssignIssue.requesting_company_name && (
+                <div className="text-muted d-flex align-items-center gap-1.5 mt-1.5">
+                  <i className="bi bi-building text-primary" />
+                  <span>Requesting Organization: <strong className="text-slate-800">{quickAssignIssue.requesting_company_name}</strong></span>
+                </div>
+              )}
+              {quickAssignIssue.team_name && (
+                <div className="text-muted d-flex align-items-center gap-1.5 mt-1">
+                  <i className="bi bi-diagram-3 text-indigo-600" />
+                  <span>Currently Assigned: <strong className="text-primary">{quickAssignIssue.team_name}</strong></span>
+                </div>
+              )}
+            </div>
+
+            <div className="mb-3">
+              <label className="form-label text-sm font-semibold text-slate-800 mb-1">
+                Select Internal BugForge Squad <span className="text-danger">*</span>
+              </label>
+              <SearchableSelect
+                placeholder="Choose internal engineering squad..."
+                isClearable
+                options={internalTeams.map(t => ({ value: t.id, label: t.name }))}
+                value={quickTeamId || null}
+                isDisabled={assigningTeam}
+                onChange={val => setQuickTeamId(val || '')}
+              />
+              <p className="text-xs text-muted mt-1.5 mb-0">
+                <i className="bi bi-info-circle me-1" />
+                Assigning an internal squad transitions the feature to <strong>Assigned</strong> and automatically alerts the squad's Project Manager & Team Leader.
+              </p>
+            </div>
+
+            <div className="d-flex justify-content-end gap-2 pt-3 border-top">
+              <button
+                type="button"
+                className="btn btn-sm btn-light border"
+                onClick={() => { setQuickAssignIssue(null); setQuickTeamId('') }}
+                disabled={assigningTeam}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary d-flex align-items-center gap-1.5"
+                disabled={assigningTeam || !quickTeamId || String(quickTeamId) === String(quickAssignIssue.team_id)}
+                onClick={async () => {
+                  setAssigningTeam(true)
+                  try {
+                    const res = await assignIssueTeam(quickAssignIssue.id, { team_id: Number(quickTeamId) })
+                    const updated = res.data
+                    const assignedTeam = internalTeams.find(t => String(t.id) === String(quickTeamId))
+                    const teamName = assignedTeam ? assignedTeam.name : (updated.team_name || 'the squad')
+                    setIssues(prev => prev.map(iss => iss.id === quickAssignIssue.id ? {
+                      ...iss,
+                      team_id: updated.team_id,
+                      team_name: updated.team_name,
+                      status_id: updated.status_id,
+                      status_name: updated.status_name,
+                    } : iss))
+                    const requestTitle = quickAssignIssue.title
+                    setQuickAssignIssue(null)
+                    setQuickTeamId('')
+                    setToast({
+                      message: `Customization request "${requestTitle}" assigned to squad "${teamName}" successfully.`,
+                      variant: 'success'
+                    })
+                  } catch (err) {
+                    const errorMsg = extractErrorMessage(err, 'Failed to assign squad.')
+                    setToast({ message: errorMsg, variant: 'error' })
+                  } finally {
+                    setAssigningTeam(false)
+                  }
+                }}
+              >
+                {assigningTeam ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm" role="status" />
+                    <span>Assigning Squad...</span>
+                  </>
+                ) : (
+                  <>
+                    <i className="bi bi-check-lg" />
+                    <span>Confirm Squad Assignment</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Global Toast Notification */}
+      <Toast
+        message={toast.message}
+        variant={toast.variant}
+        onClose={() => setToast({ message: '', variant: 'success' })}
+      />
     </>
   )
 }

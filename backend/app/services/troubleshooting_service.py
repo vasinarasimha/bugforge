@@ -300,6 +300,7 @@ class TroubleshootingService:
             category_id=issue_data.get("category_id"),
             module_id=issue_data.get("module_id"),
             assigned_to=issue_data.get("assigned_to"),
+            assigned_qa_id=issue_data.get("assigned_qa_id"),
             environment=issue_data.get("environment"),
             browser=issue_data.get("browser"),
             operating_system=issue_data.get("operating_system"),
@@ -332,6 +333,7 @@ class TroubleshootingService:
                     embedding=list(created_issue.embedding_vector),
                     exclude_issue_id=created_issue.id,
                     project_id=created_issue.project_id,
+                    company_id=created_issue.company_id,
                 )
         except Exception as e:
             logger.error(f"Similar issue detection during confirm_and_create failed: {e}")

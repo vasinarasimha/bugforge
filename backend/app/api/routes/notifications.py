@@ -119,14 +119,18 @@ async def trigger_daily_cleanup(
     if "Super Admin" not in user_roles and "Admin" not in user_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Administrators can trigger platform-wide notification cleanup",
+            detail="Only Administrators can trigger notification cleanup",
         )
 
+    is_super = "Super Admin" in user_roles
+    company_id = None if is_super else current_user.company_id
+
     deleted_count = notification_service.cleanup_read_notifications(
-        db, user_id=None, older_than_days=older_than_days
+        db, user_id=None, older_than_days=older_than_days, company_id=company_id
     )
+    scope_desc = "across the platform" if is_super else "for your company"
     return {
         "success": True,
         "deleted_count": deleted_count,
-        "message": f"Daily cleanup complete: {deleted_count} read notification(s) deleted across the platform.",
+        "message": f"Daily cleanup complete: {deleted_count} read notification(s) deleted {scope_desc}.",
     }

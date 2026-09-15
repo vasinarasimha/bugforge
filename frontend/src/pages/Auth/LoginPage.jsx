@@ -151,12 +151,12 @@ export default function LoginPage() {
                     +48.6%
                   </p>
                 </div>
-                <div className="split-stat-card">
+                {/* <div className="split-stat-card">
                   <p className="split-stat-label">CI Pipeline Lock</p>
                   <p className="split-stat-val font-display" style={{ color: '#67e8f9' }}>
                     Zero Lag
                   </p>
-                </div>
+                </div> */}
               </div>
             </div>
           </div>
@@ -271,7 +271,7 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                <div className="split-options-row">
+                {/* <div className="split-options-row">
                   <label className="split-checkbox-label">
                     <input
                       type="checkbox"
@@ -282,7 +282,7 @@ export default function LoginPage() {
                     <span>Remember me</span>
                   </label>
                   <span className="split-encryption-badge">TLS 1.3 Encrypted</span>
-                </div>
+                </div> */}
 
                 <button
                   type="submit"
@@ -311,12 +311,12 @@ export default function LoginPage() {
               </form>
             </div>
 
-            <div className="split-form-security-footer font-mono">
+            {/* <div className="split-form-security-footer font-mono">
               <span className="material-symbols-outlined" style={{ fontSize: '16px', color: '#c54500' }}>
                 verified_user
               </span>
               <span>Hardware 2FA enforced • SOC2 Type II Certified</span>
-            </div>
+            </div> */}
           </div>
         </div>
       </main>

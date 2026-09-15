@@ -1,5 +1,18 @@
 import apiClient from '../api/client'
-export const getIssues = () => apiClient.get('/issues')
+
+export const extractErrorMessage = (err, fallback = 'Operation failed.') => {
+    const detail = err?.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) {
+        return detail.map(d => d.msg || JSON.stringify(d)).join('; ')
+    }
+    if (detail && typeof detail === 'object') {
+        return detail.message || detail.msg || JSON.stringify(detail)
+    }
+    return err?.message || fallback
+}
+
+export const getIssues = (params = {}) => apiClient.get('/issues', { params })
 export const getStatuses = () => apiClient.get('/issues/statuses')
 export const getPriorities = () => apiClient.get('/issues/priorities')
 export const getSeverities = () => apiClient.get('/issues/severities')
@@ -37,6 +50,7 @@ export const addIssueAttachment = (id, file) => {
 export const deleteIssueAttachment = (id, attachmentId) => apiClient.delete(`/issues/${id}/attachments/${attachmentId}`)
 export const updateIssueStatus = (id, data) => apiClient.patch(`/issues/${id}/status`, data)
 export const updateIssueAssignee = (id, data) => apiClient.patch(`/issues/${id}/assign`, data)
+export const updateIssueQaAssignee = (id, data) => apiClient.patch(`/issues/${id}/assign-qa`, data)
 
 // ── Semantic Search & Similar Issues ──
 
@@ -54,5 +68,14 @@ export const searchIssues = (title, description, projectId = null, excludeIssueI
     apiClient.post('/issues/search', { title, description, project_id: projectId, exclude_issue_id: excludeIssueId })
 
 export const submitFeatureRequest = (data) => apiClient.post('/issues/feature-requests', data)
-export const assignIssueTeam = (issueId, teamId) => apiClient.patch(`/issues/${issueId}/assign-team`, { team_id: teamId })
+export const assignIssueTeam = (issueId, teamData) => {
+    const team_id = typeof teamData === 'object' && teamData !== null && 'team_id' in teamData
+        ? Number(teamData.team_id)
+        : Number(teamData)
+    return apiClient.patch(`/issues/${issueId}/assign-team`, { team_id })
+}
 export const qaVerifyIssue = (issueId, qaState, notes = null) => apiClient.patch(`/issues/${issueId}/qa-verify`, { qa_state: qaState, notes })
+
+/** Unified hybrid search combining keyword and vector semantic search */
+export const hybridSearch = (query = '', projectId = null, statusId = null, limit = 50) =>
+    apiClient.post('/issues/hybrid-search', { query, project_id: projectId ? Number(projectId) : null, status_id: statusId ? Number(statusId) : null, limit })

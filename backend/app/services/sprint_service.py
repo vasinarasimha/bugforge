@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.api.dependencies.auth import get_effective_company_id
 from app.models.sprint import Sprint, SprintStatus
 from app.models.issue import Issue
 from app.schemas.sprint import SprintCreate, SprintUpdate
@@ -33,7 +34,8 @@ class SprintService:
         project = db.query(Project).filter(Project.id == data.project_id).first()
         if not project:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected project does not exist")
-        if user.company_id and project.company_id != user.company_id:
+        cid = get_effective_company_id(user) if user else None
+        if cid is not None and project.company_id != cid:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot create sprint in project belonging to another company")
 
         # Validate status
@@ -55,7 +57,7 @@ class SprintService:
         return sprint
 
     def update(self, db: Session, sprint_id: int, data: SprintUpdate, user=None):
-        company_id = user.company_id if user else None
+        company_id = get_effective_company_id(user) if user else None
         sprint = self.get(db, sprint_id, company_id=company_id)
         if data.status_id is not None:
             st = db.query(SprintStatus).filter(SprintStatus.id == data.status_id).first()
@@ -68,7 +70,7 @@ class SprintService:
         return sprint
 
     def delete(self, db: Session, sprint_id: int, user=None):
-        company_id = user.company_id if user else None
+        company_id = get_effective_company_id(user) if user else None
         sprint = self.get(db, sprint_id, company_id=company_id)
         # Unlink issues before deleting
         db.query(Issue).filter(Issue.sprint_id == sprint_id).update({"sprint_id": None})
@@ -76,7 +78,7 @@ class SprintService:
         db.commit()
 
     def assign_issue(self, db: Session, sprint_id: int, issue_id: int, user):
-        company_id = user.company_id if user else None
+        company_id = get_effective_company_id(user) if user else None
         sprint = self.get(db, sprint_id, company_id=company_id)
         issue = db.query(Issue).filter(Issue.id == issue_id).first()
         if not issue:
@@ -106,7 +108,7 @@ class SprintService:
         return issue
 
     def remove_issue(self, db: Session, sprint_id: int, issue_id: int, user):
-        company_id = user.company_id if user else None
+        company_id = get_effective_company_id(user) if user else None
         sprint = self.get(db, sprint_id, company_id=company_id)
         issue = db.query(Issue).filter(Issue.id == issue_id, Issue.sprint_id == sprint_id).first()
         if not issue:

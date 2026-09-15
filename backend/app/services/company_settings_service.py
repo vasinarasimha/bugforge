@@ -432,11 +432,13 @@ class CompanySettingsService:
     def submit_customization_request(
         self, db: Session, company_id: int, data: CustomizationRequestCreate, user: User
     ) -> CustomizationRequestResponse:
+        resolved_type = getattr(data, 'request_type', 'Feature') or 'Feature'
         req = CustomizationRequest(
             company_id=company_id,
             requester_id=user.id,
             title=data.title.strip(),
             description=data.description.strip(),
+            request_type=resolved_type,
             category=data.category.strip(),
             requested_behavior=data.requested_behavior.strip(),
             status="Pending",
@@ -450,24 +452,29 @@ class CompanySettingsService:
             action="CUSTOMIZATION_REQUEST_SUBMITTED",
             entity_type="CUSTOMIZATION_REQUEST",
             entity_id=req.id,
-            new_value={"title": req.title, "category": req.category},
+            new_value={"title": req.title, "request_type": req.request_type, "category": req.category},
         ))
 
-        # Integrate with BugForge internal issue workflow as Issue Type = 'Feature'
+        # Integrate with BugForge internal issue workflow in BugForge project
         from app.services.issue_service import IssueService
         feature_desc = f"{data.description.strip()}\n\nRequested Behavior:\n{data.requested_behavior.strip()}"
         try:
-            IssueService().submit_feature_request(
+            created_issue = IssueService().submit_feature_request(
                 db=db,
                 title=data.title.strip(),
                 description=feature_desc,
                 user=user,
+                issue_type=resolved_type,
             )
+            req.linked_issue_id = created_issue.id
         except Exception as e:
-            logger.error(f"Failed to create Feature issue from customization request: {e}")
+            logger.error(f"Failed to create BugForge issue from customization request: {e}")
 
         db.commit()
         db.refresh(req)
+
+        linked_key = created_issue.issue_key if 'created_issue' in locals() and created_issue else None
+        impl_status = created_issue.status.name if 'created_issue' in locals() and created_issue and created_issue.status else req.status
 
         return CustomizationRequestResponse(
             id=req.id,
@@ -477,6 +484,7 @@ class CompanySettingsService:
             requester_name=user.full_name,
             title=req.title,
             description=req.description,
+            request_type=req.request_type,
             category=req.category,
             requested_behavior=req.requested_behavior,
             status=req.status,
@@ -484,6 +492,10 @@ class CompanySettingsService:
             reviewed_by_id=req.reviewed_by_id,
             reviewer_name=None,
             reviewed_at=req.reviewed_at,
+            linked_issue_id=req.linked_issue_id,
+            linked_issue_key=linked_key,
+            implementation_status=impl_status,
+            resolution=None,
             created_at=req.created_at,
             updated_at=req.updated_at,
         )
@@ -493,13 +505,18 @@ class CompanySettingsService:
     ) -> list[CustomizationRequestResponse]:
         requests = db.query(CustomizationRequest).options(
             joinedload(CustomizationRequest.requester),
-            joinedload(CustomizationRequest.reviewer)
+            joinedload(CustomizationRequest.reviewer),
+            joinedload(CustomizationRequest.linked_issue).joinedload(Issue.status)
         ).filter(
             CustomizationRequest.company_id == company_id
         ).order_by(CustomizationRequest.created_at.desc()).all()
 
-        return [
-            CustomizationRequestResponse(
+        results = []
+        for r in requests:
+            impl_status = r.linked_issue.status.name if r.linked_issue and r.linked_issue.status else r.status
+            linked_key = r.linked_issue.issue_key if r.linked_issue else None
+            res_notes = r.linked_issue.resolution if r.linked_issue else None
+            results.append(CustomizationRequestResponse(
                 id=r.id,
                 company_id=r.company_id,
                 company_name=r.company.name if r.company else "Your Company",
@@ -507,6 +524,7 @@ class CompanySettingsService:
                 requester_name=r.requester.full_name if r.requester else "Unknown",
                 title=r.title,
                 description=r.description,
+                request_type=getattr(r, 'request_type', 'Feature') or 'Feature',
                 category=r.category,
                 requested_behavior=r.requested_behavior,
                 status=r.status,
@@ -514,11 +532,15 @@ class CompanySettingsService:
                 reviewed_by_id=r.reviewed_by_id,
                 reviewer_name=r.reviewer.full_name if r.reviewer else None,
                 reviewed_at=r.reviewed_at,
+                linked_issue_id=r.linked_issue_id,
+                linked_issue_key=linked_key,
+                implementation_status=impl_status,
+                resolution=res_notes,
                 created_at=r.created_at,
                 updated_at=r.updated_at,
-            )
-            for r in requests
-        ]
+            ))
+        return results
+
 
     # ── Audit Trail ──
 

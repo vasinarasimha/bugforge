@@ -73,6 +73,10 @@ def setup_test_companies_and_users(db_session: Session):
         )
         admin_a.roles = [admin_role]
         db_session.add(admin_a)
+    else:
+        admin_a.company_id = comp_a.id
+        admin_a.is_active = True
+        admin_a.roles = [admin_role]
 
     # Dev Alpha (non-admin)
     dev_a = db_session.query(User).filter(User.email == "dev_alpha@test.com").first()
@@ -86,6 +90,10 @@ def setup_test_companies_and_users(db_session: Session):
         )
         dev_a.roles = [dev_role]
         db_session.add(dev_a)
+    else:
+        dev_a.company_id = comp_a.id
+        dev_a.is_active = True
+        dev_a.roles = [dev_role]
 
     # Admin Beta
     admin_b = db_session.query(User).filter(User.email == "admin_beta@test.com").first()
@@ -99,6 +107,10 @@ def setup_test_companies_and_users(db_session: Session):
         )
         admin_b.roles = [admin_role]
         db_session.add(admin_b)
+    else:
+        admin_b.company_id = comp_b.id
+        admin_b.is_active = True
+        admin_b.roles = [admin_role]
 
     # Ensure default statuses exist for test companies
     for comp in [comp_a, comp_b]:

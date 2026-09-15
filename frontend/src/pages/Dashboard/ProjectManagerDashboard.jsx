@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { getPMStats } from '../../services/dashboardService'
 import { getFieldLabel } from '../../utils/activityHelper'
+import { isIssueUnassignedOver24Hours, isClientFeatureRequest } from '../../components/IssueTable/IssueTable'
 
 const fmt = (n) => (n || 0).toLocaleString()
 const timeAgo = (iso) => {
@@ -164,16 +165,48 @@ function CriticalWatchlist({ issues }) {
             <div className="pm-watchlist-head">
               <span>Key</span><span>Title</span><span>Project</span><span>Priority</span><span>Age</span>
             </div>
-            {shown.map(i => (
-              <div key={i.id} className="pm-watchlist-row">
-                <span className="pm-issue-key">{i.issue_key}</span>
-                <span className="pm-issue-title">{i.title}</span>
-                <span className="pm-issue-proj">{i.project_name}</span>
-                <span className="pm-priority-tag" style={{ color: PRIORITY_COLORS[i.priority_name], background: (PRIORITY_COLORS[i.priority_name] || '#94a3b8') + '18' }}>{i.priority_name}</span>
-                <span className="pm-issue-age">{timeAgo(i.created_at)}</span>
-                <span className="pm-issue-action"><Link to="/issues" state={{ editIssue: i }} className="btn btn-sm btn-outline-primary" style={{ padding: '2px 8px', fontSize: '0.7rem', fontWeight: 'bold' }}>Assign</Link></span>
-              </div>
-            ))}
+            {shown.map(i => {
+              const isOverdue = isIssueUnassignedOver24Hours(i)
+              const isFeature = isClientFeatureRequest(i)
+              return (
+                <div
+                  key={i.id}
+                  className={`pm-watchlist-row ${isOverdue ? 'pm-watchlist-row-overdue' : ''}`}
+                  style={isOverdue ? { backgroundColor: 'rgba(254, 242, 242, 0.75)', borderLeft: '3px solid #ef4444' } : {}}
+                >
+                  <span className="pm-issue-key">{i.issue_key}</span>
+                  <span className="pm-issue-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {i.title}
+                    {isFeature && (
+                      <span
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 600,
+                          padding: '1px 6px',
+                          borderRadius: '9999px',
+                          background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                          color: '#ffffff',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px'
+                        }}
+                      >
+                        <i className="bi bi-stars" style={{ fontSize: '0.65rem' }} /> Client Feature
+                      </span>
+                    )}
+                    {isOverdue && (
+                      <span className="badge bg-danger text-white" style={{ fontSize: '0.65rem', fontWeight: 700, padding: '1px 5px' }}>
+                        &gt;24h Unassigned
+                      </span>
+                    )}
+                  </span>
+                  <span className="pm-issue-proj">{i.project_name}</span>
+                  <span className="pm-priority-tag" style={{ color: PRIORITY_COLORS[i.priority_name], background: (PRIORITY_COLORS[i.priority_name] || '#94a3b8') + '18' }}>{i.priority_name}</span>
+                  <span className="pm-issue-age">{timeAgo(i.created_at)}</span>
+                  <span className="pm-issue-action"><Link to="/issues" state={{ editIssue: i }} className="btn btn-sm btn-outline-primary" style={{ padding: '2px 8px', fontSize: '0.7rem', fontWeight: 'bold' }}>Assign</Link></span>
+                </div>
+              )
+            })}
           </div>
           {issues.length > 6 && (
             <button className="pm-expand-btn" onClick={() => setExpanded(e => !e)}>

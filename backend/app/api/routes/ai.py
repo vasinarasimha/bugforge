@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies.auth import get_current_user, require_role
+from app.api.dependencies.auth import get_current_user, require_role, get_effective_company_id
 from app.core.database import get_db
 from app.models.user import User
 from app.models.issue import Issue, IssueStatus
@@ -37,12 +37,13 @@ async def format_issue(req: FormatIssueRequest, _: Annotated[User, Depends(get_c
 @router.post("/resolution-assistance")
 async def get_resolution_assistance(
     req: ResolutionAssistanceRequest,
-    _: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)]
 ):
+    cid = get_effective_company_id(current_user)
     # Fetch the issue
     issue_repo = IssueRepository()
-    issue = issue_repo.get(db, req.issue_id)
+    issue = issue_repo.get(db, req.issue_id, company_id=cid)
     if not issue:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
 
@@ -83,7 +84,8 @@ async def get_resolution_assistance(
                 project_id=issue.project_id,
                 status_ids=status_ids,
                 similarity_threshold=0.60,
-                limit=5
+                limit=5,
+                company_id=cid,
             )
         similar_issues = [
             {"issue": sim_issue, "similarity": sim_score} for sim_issue, sim_score in similar_tuples
@@ -189,15 +191,16 @@ QA_ALLOWED_ROLES = ["Admin", "Project Manager", "Team Leader", "QA", "PM", "TL"]
 @router.post("/test-cases", response_model=TestCaseGenerationResponse)
 async def generate_test_cases(
     req: GenerateTestCasesRequest,
-    _: Annotated[User, Depends(require_role(QA_ALLOWED_ROLES))],
+    current_user: Annotated[User, Depends(require_role(QA_ALLOWED_ROLES))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
     Generate structured, multi-perspective QA test cases for an existing defect.
     Restricted to Admin, PM, TL, and QA roles.
     """
+    cid = get_effective_company_id(current_user)
     issue_repo = IssueRepository()
-    issue = issue_repo.get(db, req.issue_id)
+    issue = issue_repo.get(db, req.issue_id, company_id=cid)
     if not issue:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
 
@@ -208,15 +211,16 @@ async def generate_test_cases(
 @router.post("/missing-scenarios", response_model=MissingScenariosResponse)
 async def detect_missing_scenarios(
     req: MissingScenariosRequest,
-    _: Annotated[User, Depends(require_role(QA_ALLOWED_ROLES))],
+    current_user: Annotated[User, Depends(require_role(QA_ALLOWED_ROLES))],
     db: Annotated[Session, Depends(get_db)],
 ):
     """
     Analyze defect and existing test cases to identify overlooked edge cases and test coverage gaps.
     Restricted to Admin, PM, TL, and QA roles.
     """
+    cid = get_effective_company_id(current_user)
     issue_repo = IssueRepository()
-    issue = issue_repo.get(db, req.issue_id)
+    issue = issue_repo.get(db, req.issue_id, company_id=cid)
     if not issue:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
 

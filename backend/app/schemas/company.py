@@ -89,6 +89,7 @@ class CompanySettingsUpdate(BaseModel):
 class CustomizationRequestCreate(BaseModel):
     title: str = Field(min_length=3, max_length=150)
     description: str = Field(min_length=10, max_length=5000)
+    request_type: str = Field(default="Feature", pattern=r"^(Feature|Defect)$")
     category: str = Field(default="Workflow", max_length=50)
     requested_behavior: str = Field(min_length=10, max_length=5000)
 
@@ -107,6 +108,7 @@ class CustomizationRequestResponse(BaseModel):
     requester_name: Optional[str] = None
     title: str
     description: str
+    request_type: str = "Feature"
     category: str
     requested_behavior: str
     status: str
@@ -114,8 +116,13 @@ class CustomizationRequestResponse(BaseModel):
     reviewed_by_id: Optional[int] = None
     reviewer_name: Optional[str] = None
     reviewed_at: Optional[datetime] = None
+    linked_issue_id: Optional[int] = None
+    linked_issue_key: Optional[str] = None
+    implementation_status: Optional[str] = None
+    resolution: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
 
 
 # ── Audit Log Schema ──

@@ -70,6 +70,7 @@ class IssueCreate(BaseModel):
     category_id: int | None = Field(default=None, gt=0)
     module_id: int | None = Field(default=None, gt=0)
     assigned_to: int | None = Field(default=None, gt=0)
+    assigned_qa_id: int | None = Field(default=None, gt=0)
     environment: str | None = None
     browser: str | None = None
     operating_system: str | None = None
@@ -92,6 +93,9 @@ class IssueUpdate(IssueCreate):
 
 class IssueAssignTeamRequest(BaseModel):
     team_id: int = Field(gt=0)
+
+class IssueAssignQAUpdate(BaseModel):
+    assigned_qa_id: int | None = None
 
 class IssueQAVerifyRequest(BaseModel):
     qa_state: str = Field(pattern=r"^(Passed|Requires Rework)$")
@@ -137,6 +141,8 @@ class IssueResponse(BaseModel):
     reporter_name: str
     assigned_to: int | None
     assignee: str | None = None
+    assigned_qa_id: int | None = None
+    assigned_qa_name: str | None = None
     company_id: int | None = None
     requesting_company_id: int | None = None
     requesting_company_name: str | None = None
@@ -147,9 +153,14 @@ class IssueResponse(BaseModel):
     qa_verified_by_name: str | None = None
     qa_verified_at: datetime | None = None
     ai_root_cause_session_id: int | None = None
+    developer_fixed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     is_active: bool
+    is_unassigned_over_24h: bool = False
+    isUnassignedOver24Hours: bool = False
+    is_qa_unassigned_over_1h: bool = False
+    isQaUnassignedOver1Hour: bool = False
 
 class IssueCommentCreate(BaseModel):
     content: str = Field(min_length=1, max_length=5000)

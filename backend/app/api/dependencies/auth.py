@@ -55,3 +55,20 @@ def require_role(allowed_roles: list[Any]):
         return current_user
 
     return role_checker
+
+
+def is_super_admin(user: User) -> bool:
+    """Check if the user has the Super Admin role."""
+    user_roles = [r.name for r in getattr(user, "roles", [])]
+    return "Super Admin" in user_roles
+
+
+def get_effective_company_id(user: User) -> int | None:
+    """
+    Returns None for Super Admin (granting platform-wide, cross-tenant access),
+    or user.company_id for all other users (strictly enforcing tenant isolation).
+    """
+    if is_super_admin(user):
+        return None
+    return user.company_id
+

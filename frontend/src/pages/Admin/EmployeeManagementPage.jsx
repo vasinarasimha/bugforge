@@ -308,7 +308,8 @@ export default function EmployeeManagementPage() {
           </div>
           <div className="d-flex align-items-center gap-2">
             <span className="badge bg-light text-dark border px-3 py-2 rounded-pill">
-              Employee ID: #{selectedEmployee.id}
+              <i className="bi bi-person-badge me-1 text-primary" />
+              {selectedEmployee.department || selectedEmployee.role || 'Member'}
             </span>
           </div>
         </div>
@@ -1170,8 +1171,8 @@ export default function EmployeeManagementPage() {
                     </span>
                   </div>
                   <div className="list-group-item px-0 py-2 d-flex justify-content-between">
-                    <span className="text-muted small">Employee ID</span>
-                    <span className="badge bg-light text-dark border">#{selectedEmployee.id}</span>
+                    <span className="text-muted small">Department / Unit</span>
+                    <span className="badge bg-light text-dark border">{selectedEmployee.department || 'General'}</span>
                   </div>
                 </div>
               </div>
