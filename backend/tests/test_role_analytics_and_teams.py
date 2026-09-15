@@ -25,7 +25,7 @@ def db_session():
         db.close()
 
 
-def _get_or_create_user(db: Session, email: str, full_name: str, role_name: str) -> User:
+def _get_or_create_user(db: Session, email: str, full_name: str, role_name: str, company_id: int = 1) -> User:
     u = db.query(User).filter(User.email == email).first()
     if not u:
         role = db.query(Role).filter(Role.name == role_name).first()
@@ -34,29 +34,36 @@ def _get_or_create_user(db: Session, email: str, full_name: str, role_name: str)
             full_name=full_name,
             password_hash="mock_hash",
             is_active=True,
-            is_system_user=False
+            is_system_user=False,
+            company_id=company_id
         )
         if role:
             u.roles = [role]
         db.add(u)
         db.commit()
         db.refresh(u)
+    else:
+        if u.company_id != company_id:
+            u.company_id = company_id
+            db.commit()
+            db.refresh(u)
     return u
 
 
 @pytest.fixture
 def admin_user(db_session: Session):
-    return _get_or_create_user(db_session, "vln@admin.in", "Admin User", "Admin")
+    return _get_or_create_user(db_session, "vln@admin.in", "Admin User", "Admin", company_id=1)
 
 
 @pytest.fixture
 def pm_user(db_session: Session):
-    u = _get_or_create_user(db_session, "vln@pm.in", "Project Manager User", "Project Manager")
+    u = _get_or_create_user(db_session, "vln@pm.in", "Project Manager User", "Project Manager", company_id=1)
     team = db_session.query(Team).filter(Team.project_manager_id == u.id, Team.is_active == True).first()
     if not team:
         core_team = db_session.query(Team).filter(Team.name.in_(["BugForge Core Team", "BugForge"])).first()
         if core_team:
             core_team.project_manager_id = u.id
+            core_team.company_id = 1
             db_session.commit()
         else:
             team = Team(
@@ -73,12 +80,13 @@ def pm_user(db_session: Session):
 
 @pytest.fixture
 def tl_user(db_session: Session):
-    u = _get_or_create_user(db_session, "vln@tl.in", "Team Leader User", "Team Leader")
+    u = _get_or_create_user(db_session, "vln@tl.in", "Team Leader User", "Team Leader", company_id=1)
     team = db_session.query(Team).filter(Team.team_leader_id == u.id, Team.is_active == True).first()
     if not team:
         core_team = db_session.query(Team).filter(Team.name.in_(["BugForge Core Team", "BugForge"])).first()
         if core_team and not core_team.team_leader_id:
             core_team.team_leader_id = u.id
+            core_team.company_id = 1
             db_session.commit()
         else:
             team = Team(
@@ -95,7 +103,7 @@ def tl_user(db_session: Session):
 
 @pytest.fixture
 def dev_user(db_session: Session):
-    return _get_or_create_user(db_session, "vln@dev.in", "Developer User", "Developer")
+    return _get_or_create_user(db_session, "vln@dev.in", "Developer User", "Developer", company_id=1)
 
 
 @pytest.fixture

@@ -118,6 +118,10 @@ class TeamService:
         # Validate Team Leader
         if data.team_leader_id:
             tl_user = self.user_repository.get_by_id(db, data.team_leader_id, company_id=company_id)
+            if not tl_user and company_id == 1:
+                tl_candidate = self.user_repository.get_by_id(db, data.team_leader_id)
+                if tl_candidate and (tl_candidate.company_id is None or tl_candidate.company_id == 1):
+                    tl_user = tl_candidate
             if not tl_user or tl_user.is_system_user:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -134,6 +138,10 @@ class TeamService:
         # Validate Project Manager (if provided)
         if data.project_manager_id:
             pm_user = self.user_repository.get_by_id(db, data.project_manager_id, company_id=company_id)
+            if not pm_user and company_id == 1:
+                pm_candidate = self.user_repository.get_by_id(db, data.project_manager_id)
+                if pm_candidate and (pm_candidate.company_id is None or pm_candidate.company_id == 1):
+                    pm_user = pm_candidate
             if not pm_user or pm_user.is_system_user:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -185,6 +193,10 @@ class TeamService:
         if data.team_leader_id is not None:
             if data.team_leader_id != team.team_leader_id:
                 tl_user = self.user_repository.get_by_id(db, data.team_leader_id, company_id=team.company_id)
+                if not tl_user and team.company_id == 1:
+                    tl_candidate = self.user_repository.get_by_id(db, data.team_leader_id)
+                    if tl_candidate and (tl_candidate.company_id is None or tl_candidate.company_id == 1):
+                        tl_user = tl_candidate
                 if not tl_user or tl_user.is_system_user:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -202,6 +214,10 @@ class TeamService:
         if data.project_manager_id is not None:
             if data.project_manager_id != team.project_manager_id:
                 pm_user = self.user_repository.get_by_id(db, data.project_manager_id, company_id=team.company_id)
+                if not pm_user and team.company_id == 1:
+                    pm_candidate = self.user_repository.get_by_id(db, data.project_manager_id)
+                    if pm_candidate and (pm_candidate.company_id is None or pm_candidate.company_id == 1):
+                        pm_user = pm_candidate
                 if not pm_user or pm_user.is_system_user:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,

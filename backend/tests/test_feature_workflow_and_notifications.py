@@ -498,7 +498,7 @@ def test_feature_closure_notifies_customer_company(db_session: Session, workflow
 
     closed_status = db_session.query(IssueStatus).filter(
         IssueStatus.company_id == 1,
-        IssueStatus.is_final == True
+        (IssueStatus.category == "closed") | (IssueStatus.name == "Closed")
     ).first()
     if not closed_status:
         closed_status = IssueStatus(

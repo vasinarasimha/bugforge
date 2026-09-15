@@ -8,10 +8,10 @@ from app.models.role import Role, Permission, user_roles, role_permissions
 
 from app.models.label import IssueLabel, issue_label_mapping
 from app.models.history import IssueHistory
+from app.models.project_history import ProjectHistory
 from app.models.comment import IssueComment
-from app.models.sprint import Sprint
+from app.models.sprint import Sprint, SprintStatus
 from app.models.attachment import IssueAttachment
-from app.models.sprint import Sprint
 from app.models.troubleshooting import TroubleshootingSession, TroubleshootingAnswer
 from app.models.team import Team, TeamMember
 
@@ -26,6 +26,7 @@ __all__ = [
     "User",
     "Project",
     "ProjectMember",
+    "ProjectHistory",
     "Team",
     "TeamMember",
     "Issue",
@@ -42,6 +43,7 @@ __all__ = [
     "IssueHistory",
     "IssueComment",
     "Sprint",
+    "SprintStatus",
     "IssueAttachment",
     "TroubleshootingSession",
     "TroubleshootingAnswer",

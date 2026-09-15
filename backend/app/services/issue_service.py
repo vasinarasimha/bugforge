@@ -761,13 +761,26 @@ class IssueService:
         if not proj:
             from app.models.user import User
             admin_user = db.query(User).filter(User.company_id == bf_comp.id).first()
+            if not admin_user:
+                admin_user = db.query(User).first()
+            if not admin_user:
+                admin_user = User(
+                    full_name="BugForge Admin",
+                    email="admin@bugforge.internal",
+                    password_hash="mock_hash",
+                    company_id=bf_comp.id,
+                    is_active=True
+                )
+                db.add(admin_user)
+                db.flush()
+
             proj = Project(
                 name="BugForge",
                 key="BF",
                 description="BugForge platform feature requests and customizations",
                 company_id=bf_comp.id,
                 is_active=True,
-                created_by=admin_user.id if admin_user else None,
+                created_by=admin_user.id,
             )
             db.add(proj)
             db.commit()

@@ -36,6 +36,24 @@ def setup_routing_data(db_session: Session):
         db_session.add(bf_comp)
         db_session.flush()
 
+    # Roles
+    admin_role = db_session.query(Role).filter(Role.name == "Admin").first()
+    sa_role = db_session.query(Role).filter(Role.name == "Super Admin").first()
+
+    # 2. BugForge User
+    bf_user = db_session.query(User).filter(User.email == "bf_core_eng@bugforge.test").first()
+    if not bf_user:
+        bf_user = User(
+            email="bf_core_eng@bugforge.test",
+            password_hash="testpass",
+            full_name="BugForge Core Engineer",
+            company_id=bf_comp.id,
+            is_active=True,
+            roles=[admin_role] if admin_role else []
+        )
+        db_session.add(bf_user)
+        db_session.flush()
+
     # BugForge Project
     bf_project = db_session.query(Project).filter(Project.company_id == bf_comp.id).first()
     if not bf_project:
@@ -43,6 +61,7 @@ def setup_routing_data(db_session: Session):
             name="BugForge Platform Core",
             key="BF",
             company_id=bf_comp.id,
+            created_by=bf_user.id,
             status="Active"
         )
         db_session.add(bf_project)
@@ -65,24 +84,6 @@ def setup_routing_data(db_session: Session):
     if not resolved_status:
         resolved_status = IssueStatus(name="Resolved", company_id=bf_comp.id, category="resolved", is_active=True)
         db_session.add(resolved_status)
-        db_session.flush()
-
-    # Roles
-    admin_role = db_session.query(Role).filter(Role.name == "Admin").first()
-    sa_role = db_session.query(Role).filter(Role.name == "Super Admin").first()
-
-    # 2. BugForge User
-    bf_user = db_session.query(User).filter(User.email == "bf_core_eng@bugforge.test").first()
-    if not bf_user:
-        bf_user = User(
-            email="bf_core_eng@bugforge.test",
-            password_hash="testpass",
-            full_name="BugForge Core Engineer",
-            company_id=bf_comp.id,
-            is_active=True,
-            roles=[admin_role] if admin_role else []
-        )
-        db_session.add(bf_user)
         db_session.flush()
 
     # 3. Customer Company

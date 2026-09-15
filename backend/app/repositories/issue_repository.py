@@ -33,12 +33,15 @@ class IssueRepository:
         issue_type: str | None = None,
         requesting_company_id: int | None = None,
         is_bugforge: bool = False,
+        include_client_requests: bool = False,
     ) -> list[Issue]:
         logger.debug("Fetching issues from the database")
         stmt = select(Issue).options(*self._options).where(Issue.is_deleted == False)
         if company_id is not None:
             if is_bugforge:
                 stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id.isnot(None)))
+            elif include_client_requests:
+                stmt = stmt.where((Issue.company_id == company_id) | (Issue.requesting_company_id == company_id))
             else:
                 stmt = stmt.where(Issue.company_id == company_id)
         if requesting_company_id is not None and is_bugforge:

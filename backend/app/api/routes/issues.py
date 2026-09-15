@@ -343,6 +343,7 @@ async def list_issues(
             issue_type=issue_type,
             requesting_company_id=effective_req_company,
             is_bugforge=is_bf,
+            include_client_requests=True,
         )
         if status_id is not None:
             issues = [i for i in issues if i.status_id == status_id]
