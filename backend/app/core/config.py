@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     hf_token: str = ""
 
+    # LLM model configuration
+    groq_model: str = "qwen/qwen3.8-27b"
+    groq_tool_model: str = "qwen/qwen3.8-27b"
+    ai_tool_calling_enabled: bool = True
+
     # Semantic similarity thresholds (cosine similarity, 0-1)
     similarity_threshold: float = 0.60
     duplicate_threshold: float = 0.85

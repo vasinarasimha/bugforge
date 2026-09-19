@@ -4,7 +4,7 @@ import Modal from '../../components/Modal/Modal'
 import { createProject, deleteProject, getProjects, updateProject, getProjectHistory } from '../../services/projectService'
 import { getUsers } from '../../services/authService'
 import { useAuth } from '../../hooks/useAuth'
-import { getFieldLabel } from '../../utils/activityHelper'
+import { getFieldLabel, isIgnoredTimelineField } from '../../utils/activityHelper'
 import { useLocation } from 'react-router-dom'
 import SearchableSelect from '../../components/common/SearchableSelect'
 
@@ -328,12 +328,12 @@ export default function ProjectsPage() {
                 <button type="button" className="btn-close" onClick={closeHistoryModal} />
               </div>
               <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-                {historyLoading && <div class="text-center py-4">Loading history...</div>}
-                {!historyLoading && historyRecords.length === 0 && (
-                  <div class="text-center py-4 text-muted">No change history available for this project.</div>
+                {historyLoading && <div className="text-center py-4">Loading history...</div>}
+                {!historyLoading && historyRecords.filter(r => !isIgnoredTimelineField(r.field_name)).length === 0 && (
+                  <div className="text-center py-4 text-muted">No change history available for this project.</div>
                 )}
-                {!historyLoading && historyRecords.length > 0 && (
-                  <div class="table-responsive">
+                {!historyLoading && historyRecords.filter(r => !isIgnoredTimelineField(r.field_name)).length > 0 && (
+                  <div className="table-responsive">
                     <table className="table table-striped table-hover">
                       <thead>
                         <tr>
@@ -345,7 +345,7 @@ export default function ProjectsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {historyRecords.map((record) => (
+                        {historyRecords.filter(r => !isIgnoredTimelineField(r.field_name)).map((record) => (
                           <tr key={record.id}>
                             <td>
                               <span className="badge bg-info text-wrap text-capitalize" style={{ maxWidth: '150px' }}>

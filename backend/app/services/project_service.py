@@ -1,4 +1,5 @@
 from fastapi import HTTPException, status
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.auth import get_effective_company_id, is_super_admin
@@ -52,6 +53,25 @@ class ProjectService:
         if not company_id:
             company_id = user.company_id or 1
         self._validate_members(db, data.project_manager_id, data.team_leader_id, company_id)
+
+        # Check duplicate key or name in this company
+        existing_proj = db.query(Project).filter(
+            Project.company_id == company_id,
+            or_(
+                func.lower(Project.name) == data.name.strip().lower(),
+                func.upper(Project.key) == data.key.strip().upper(),
+            )
+        ).first()
+        if existing_proj:
+            if existing_proj.key.upper() == data.key.strip().upper():
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"A project with key '{data.key.strip().upper()}' already exists in this company."
+                )
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"A project with name '{data.name.strip()}' already exists in this company."
+            )
 
         project = Project(
             name=data.name.strip(),

@@ -1,6 +1,32 @@
 import React from 'react'
 
 /**
+ * Fields that must NEVER be displayed in the UI activity log/timeline.
+ */
+export const IGNORED_TIMELINE_FIELDS = new Set([
+  'id',
+  'issue_key',
+  'company_id',
+  'company',
+  'requesting_company_id',
+  'requesting_company',
+  'ai_root_cause_session_id',
+  'developer_fixed_at',
+  'qa_verified_at',
+  'qa_verified_by_id',
+  'created_at',
+  'updated_at',
+  'is_deleted',
+  'embedding_vector',
+])
+
+export const isIgnoredTimelineField = (field) => {
+  if (!field) return true
+  const normalized = String(field).toLowerCase().trim()
+  return IGNORED_TIMELINE_FIELDS.has(normalized)
+}
+
+/**
  * Clean field name mapping: maps database/API internal names to human-readable labels.
  */
 export const FIELD_LABELS = {
@@ -35,6 +61,7 @@ export const FIELD_LABELS = {
 export const getFieldLabel = (field) => {
   if (!field) return 'field'
   const normalized = String(field).toLowerCase().trim()
+  if (IGNORED_TIMELINE_FIELDS.has(normalized)) return ''
   if (FIELD_LABELS[normalized]) return FIELD_LABELS[normalized]
   // Fallback: strip _id suffix and convert underscores to spaces
   return normalized.replace(/_id$/i, '').replace(/_/g, ' ')
@@ -110,8 +137,9 @@ export const resolveFieldValue = (field, value, lookups = {}) => {
  * Returns plain text sentence for activity log.
  */
 export const formatActivitySentenceText = (event, lookups = {}) => {
-  const user = event.user_name || 'System'
   const rawField = event.field_name
+  if (isIgnoredTimelineField(rawField)) return null
+  const user = event.user_name || 'System'
   const fieldLabel = getFieldLabel(rawField)
   const oldVal = resolveFieldValue(rawField, event.old_value, lookups)
   const newVal = resolveFieldValue(rawField, event.new_value, lookups)
@@ -144,8 +172,9 @@ export const formatActivitySentenceText = (event, lookups = {}) => {
  * React Component that renders a beautifully formatted, natural activity sentence.
  */
 export function ActivitySentence({ event, lookups = {} }) {
-  const user = event.user_name || 'System'
   const rawField = event.field_name
+  if (isIgnoredTimelineField(rawField)) return null
+  const user = event.user_name || 'System'
   const fieldLabel = getFieldLabel(rawField)
   const oldVal = resolveFieldValue(rawField, event.old_value, lookups)
   const newVal = resolveFieldValue(rawField, event.new_value, lookups)

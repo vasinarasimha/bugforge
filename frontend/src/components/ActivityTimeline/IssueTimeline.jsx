@@ -11,7 +11,7 @@ import {
 } from '../../services/issueService';
 import { getProjects } from '../../services/projectService';
 import { getUsers } from '../../services/authService';
-import { ActivitySentence } from '../../utils/activityHelper';
+import { ActivitySentence, isIgnoredTimelineField } from '../../utils/activityHelper';
 
 export default function IssueTimeline({ issueId, lookups: propLookups }) {
     const [events, setEvents] = useState([]);
@@ -67,7 +67,9 @@ export default function IssueTimeline({ issueId, lookups: propLookups }) {
             ]);
 
             const combined = [
-                ...(historyRes.data || []).map(h => ({ type: 'history', ...h })),
+                ...(historyRes.data || [])
+                    .filter(h => !isIgnoredTimelineField(h.field_name))
+                    .map(h => ({ type: 'history', ...h })),
                 ...(commentsRes.data || []).map(c => ({ type: 'comment', ...c }))
             ];
 

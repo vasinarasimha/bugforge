@@ -124,7 +124,18 @@ async def get_resolution_assistance(
     similar_resolved_list = [similar_issue_to_dict(item) for item in similar_issues]
 
     # Generate resolution assistance
-    result = llm_service.generate_resolution_assistance(issue_dict, similar_resolved_list)
+    try:
+        result = llm_service.generate_resolution_assistance(issue_dict, similar_resolved_list)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to generate resolution assistance: {e}")
+        result = {
+            "historical_resolutions": [],
+            "investigation_areas": ["Review application logs", "Check recent code changes"],
+            "possible_causes": ["Unexpected application error"],
+            "suggested_resolution": "Review relevant logs and recent code changes.",
+            "similar_defects_summary": "AI resolution assistance is temporarily unavailable."
+        }
 
     # Enhance with AI root-cause analysis data if available
     ai_root_cause = None

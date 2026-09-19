@@ -111,6 +111,16 @@ def toggle_company_status(
     return service.set_company_active_status(db, company_id, is_active, current_user)
 
 
+@router.delete("/companies/{company_id}", status_code=status.HTTP_200_OK)
+def delete_company(
+    company_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_role([UserRole.SUPER_ADMIN]))],
+):
+    """Permanently delete a company and all associated tenant records (Super Admin only)."""
+    return service.delete_company(db, company_id, current_user)
+
+
 @router.get("/companies/{company_id}/audit-logs", response_model=list[CompanyAuditLogResponse])
 def get_company_audit_logs(
     company_id: int,

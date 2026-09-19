@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { getPMStats } from '../../services/dashboardService'
-import { getFieldLabel } from '../../utils/activityHelper'
+import { getFieldLabel, isIgnoredTimelineField } from '../../utils/activityHelper'
 import { isIssueUnassignedOver24Hours, isClientFeatureRequest } from '../../components/IssueTable/IssueTable'
 
 const fmt = (n) => (n || 0).toLocaleString()
@@ -220,17 +220,18 @@ function CriticalWatchlist({ issues }) {
 }
 
 function ActivityFeed({ items }) {
+  const visibleItems = (items || []).filter(h => !isIgnoredTimelineField(h.field_name))
   return (
     <div className="pm-section-card">
       <h3 className="pm-section-title">
         <i className="bi bi-stars pm-section-icon"></i>
         Recent Activity
       </h3>
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <div className="pm-empty">No recent activity recorded.</div>
       ) : (
         <div className="pm-activity-list">
-          {items.map(h => (
+          {visibleItems.map(h => (
             <div key={h.id} className="pm-activity-item">
               <div className="pm-activity-dot" />
               <div className="pm-activity-body">
