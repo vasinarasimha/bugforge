@@ -11,12 +11,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class TroubleshootingStartRequest(BaseModel):
     """Defect draft data to start a troubleshooting session."""
-    title: str = Field(min_length=1, max_length=200)
-    description: str = Field(min_length=1, max_length=10000)
-    project_id: int = Field(gt=0)
-    priority_id: int = Field(gt=0)
-    severity_id: int = Field(gt=0)
-    status_id: int = Field(gt=0)
+    issue_id: int | None = None
+    title: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=10000)
+    project_id: int | None = Field(default=None, gt=0)
+    priority_id: int | None = Field(default=None, gt=0)
+    severity_id: int | None = Field(default=None, gt=0)
+    status_id: int | None = Field(default=None, gt=0)
     issue_type: str = "Defect"
     category_id: int | None = Field(default=None, gt=0)
     module_id: int | None = Field(default=None, gt=0)

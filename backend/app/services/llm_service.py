@@ -3,9 +3,9 @@ from groq import Groq
 from app.core.config import get_settings
 
 class GroqService:
-    def __init__(self, model_name: str = "openai/gpt-oss-20b"):
+    def __init__(self, model_name: str | None = None):
         settings = get_settings()
-        self.model = model_name
+        self.model = model_name or settings.groq_model or "qwen/qwen3.8-27b"
         self.client = None
         try:
             if settings.groq_api_key:
@@ -142,6 +142,7 @@ Output ONLY valid JSON in the exact format: {{"title": "...", "description": "..
                 messages=[{"role": "user", "content": prompt}],
                 model=self.model,
                 temperature=0.0,
+                max_tokens=600,
                 response_format={"type": "json_object"}
             )
             data = json.loads(response.choices[0].message.content)
@@ -180,15 +181,17 @@ RECENT ISSUES:
 
 Output ONLY valid JSON in the exact format: {{"summary": "your short summary here"}}
 """
-        response = self.client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model=self.model,
-            temperature=0.0,
-            response_format={"type": "json_object"}
-        )
         try:
+            response = self.client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model,
+                temperature=0.0,
+                max_tokens=250,
+                response_format={"type": "json_object"}
+            )
             return json.loads(response.choices[0].message.content)
-        except Exception:
+        except Exception as e:
+            print(f"services/llm_service.py summarize_timeline failed: {e}")
             return {"summary": "Unable to generate summary at this time."}
 
     def generate_resolution_assistance(self, issue: dict, similar_resolved: list[dict]) -> dict:
@@ -251,21 +254,23 @@ Output ONLY valid JSON in this EXACT format:
   "similar_defects_summary": "..."
 }}
 """
-        response = self.client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model=self.model,
-            temperature=0.2,
-            response_format={"type": "json_object"}
-        )
         try:
+            response = self.client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model,
+                temperature=0.2,
+                max_tokens=800,
+                response_format={"type": "json_object"}
+            )
             return json.loads(response.choices[0].message.content)
-        except Exception:
+        except Exception as e:
+            print(f"services/llm_service.py generate_resolution_assistance failed: {e}; returning safe fallback.")
             return {
                 "historical_resolutions": [],
                 "investigation_areas": ["Review application logs", "Check recent code changes"],
                 "possible_causes": ["Unexpected null or undefined value"],
                 "suggested_resolution": "Review the relevant module for unhandled exceptions.",
-                "similar_defects_summary": "No clear historical match found."
+                "similar_defects_summary": "AI resolution assistance is temporarily unavailable."
             }
 
     def _parse_json(self, content: str) -> dict:
@@ -524,7 +529,7 @@ Output ONLY valid JSON in this EXACT structure:
   ]
 }}"""
 
-        # Attempt 1: with json_object response format and high max_tokens for reasoning models
+        # Attempt 1: with json_object response format
         try:
             response = self.client.chat.completions.create(
                 messages=[
@@ -533,7 +538,7 @@ Output ONLY valid JSON in this EXACT structure:
                 ],
                 model=self.model,
                 temperature=0.2,
-                max_tokens=8192,
+                max_tokens=950,
                 response_format={"type": "json_object"}
             )
             parsed = self._parse_json(response.choices[0].message.content)
@@ -549,7 +554,7 @@ Output ONLY valid JSON in this EXACT structure:
                     ],
                     model=self.model,
                     temperature=0.2,
-                    max_tokens=8192
+                    max_tokens=950
                 )
                 parsed = self._parse_json(response.choices[0].message.content)
                 return self._normalize_test_cases_response(parsed, defect)
@@ -632,7 +637,10 @@ Output ONLY valid JSON in this EXACT structure:
         if existing_test_cases and len(existing_test_cases) > 0:
             parts = []
             for tc in existing_test_cases[:15]:
-                parts.append(f"- [{tc.get('test_case_id', 'TC')}] ({tc.get('test_type', 'Test')}) {tc.get('scenario', '')}")
+                if isinstance(tc, dict):
+                    parts.append(f"- [{tc.get('test_case_id', 'TC')}] ({tc.get('test_type', 'Test')}) {tc.get('scenario', '')}")
+                else:
+                    parts.append(f"- {str(tc)}")
             existing_tests_text = "\n".join(parts)
 
         system_msg = "You are an expert QA Architect specializing in exploratory testing and edge-case discovery. You must return ONLY a valid JSON object matching the requested schema. Do not output markdown fences or conversational text."
@@ -690,7 +698,7 @@ Output ONLY valid JSON in this EXACT structure:
                 ],
                 model=self.model,
                 temperature=0.2,
-                max_tokens=8192,
+                max_tokens=850,
                 response_format={"type": "json_object"}
             )
             parsed = self._parse_json(response.choices[0].message.content)
@@ -706,7 +714,7 @@ Output ONLY valid JSON in this EXACT structure:
                     ],
                     model=self.model,
                     temperature=0.2,
-                    max_tokens=8192
+                    max_tokens=850
                 )
                 parsed = self._parse_json(response.choices[0].message.content)
                 return self._normalize_missing_scenarios_response(parsed, defect)

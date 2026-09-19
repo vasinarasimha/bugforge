@@ -50,7 +50,7 @@ class TestCaseGenerationResponse(BaseModel):
 
 class MissingScenariosRequest(BaseModel):
     issue_id: int
-    existing_test_cases: list[dict] | None = None
+    existing_test_cases: list[dict | str] | None = None
 
 
 class MissingScenarioItem(BaseModel):

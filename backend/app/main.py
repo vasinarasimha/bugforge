@@ -33,6 +33,11 @@ try:
     from app.api.routes.ai import router as ai_router
 except ImportError:
     ai_router = None
+try:
+    from app.api.routes.copilot import router as copilot_router, alt_router as alt_copilot_router
+except ImportError:
+    copilot_router = None
+    alt_copilot_router = None
 
 settings = get_settings()
 
@@ -101,6 +106,10 @@ app.include_router(sprints_router, prefix="/api", tags=["sprints"])
 app.include_router(uploads_router, prefix="/api", tags=["uploads"])
 if ai_router:
     app.include_router(ai_router, prefix="/api", tags=["ai"])
+if copilot_router:
+    app.include_router(copilot_router, prefix="/api", tags=["copilot"])
+if alt_copilot_router:
+    app.include_router(alt_copilot_router, prefix="/api", tags=["copilot"])
 
 uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
 os.makedirs(uploads_dir, exist_ok=True)

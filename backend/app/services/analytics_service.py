@@ -28,6 +28,8 @@ SEVERITY_COLORS = {
     "High": "#f97316",
     "Medium": "#f59e0b",
     "Low": "#10b981",
+    "Major": "#ea580c",
+    "Minor": "#06b6d4",
     "Unknown": "#94a3b8"
 }
 

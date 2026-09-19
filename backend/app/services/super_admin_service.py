@@ -363,6 +363,49 @@ class SuperAdminService:
         db.refresh(company)
         return self._serialize_company(db, company)
 
+    def delete_company(self, db: Session, company_id: int, current_user: User) -> dict[str, Any]:
+        """
+        Permanently purge a company and all associated tenant resources.
+        Used for tenant deletion and test cleanup by Super Admin.
+        """
+        from sqlalchemy import text
+
+        company = db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+        company_name = company.name
+
+        statements = [
+            "DELETE FROM troubleshooting_answers WHERE session_id IN (SELECT id FROM troubleshooting_sessions WHERE user_id IN (SELECT id FROM users WHERE company_id = :cid))",
+            "DELETE FROM troubleshooting_sessions WHERE user_id IN (SELECT id FROM users WHERE company_id = :cid)",
+            "DELETE FROM issue_comments WHERE issue_id IN (SELECT id FROM issues WHERE company_id = :cid)",
+            "DELETE FROM issue_attachments WHERE issue_id IN (SELECT id FROM issues WHERE company_id = :cid)",
+            "DELETE FROM issue_history WHERE issue_id IN (SELECT id FROM issues WHERE company_id = :cid)",
+            "DELETE FROM issue_label_mapping WHERE issue_id IN (SELECT id FROM issues WHERE company_id = :cid)",
+            "DELETE FROM issues WHERE company_id = :cid",
+            "DELETE FROM project_history WHERE project_id IN (SELECT id FROM projects WHERE company_id = :cid)",
+            "DELETE FROM sprints WHERE project_id IN (SELECT id FROM projects WHERE company_id = :cid)",
+            "DELETE FROM project_members WHERE project_id IN (SELECT id FROM projects WHERE company_id = :cid)",
+            "DELETE FROM projects WHERE company_id = :cid",
+            "DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE company_id = :cid)",
+            "DELETE FROM teams WHERE company_id = :cid",
+            "DELETE FROM notifications WHERE company_id = :cid",
+            "DELETE FROM customization_requests WHERE company_id = :cid",
+            "DELETE FROM company_audit_logs WHERE company_id = :cid",
+            "DELETE FROM issue_statuses WHERE company_id = :cid",
+            "DELETE FROM company_settings WHERE company_id = :cid",
+            "DELETE FROM user_roles WHERE user_id IN (SELECT id FROM users WHERE company_id = :cid)",
+            "DELETE FROM users WHERE company_id = :cid",
+            "DELETE FROM companies WHERE id = :cid",
+        ]
+
+        for stmt in statements:
+            db.execute(text(stmt), {"cid": company_id})
+
+        db.commit()
+        return {"message": f"Company '{company_name}' and all associated tenant records deleted successfully."}
+
     def get_platform_dashboard(self, db: Session) -> PlatformDashboardResponse:
         """
         Super Admin platform overview dashboard.

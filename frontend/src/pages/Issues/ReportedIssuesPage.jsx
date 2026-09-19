@@ -64,7 +64,11 @@ export default function ReportedIssuesPage() {
   const canDeleteIssue = ['Admin', 'Super Admin', 'QA', 'Project Manager'].includes(userRole) || userRoles.some(r => ['Admin', 'Super Admin', 'QA', 'Project Manager'].includes(r))
   const canAccessTestIntelligence = userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
   const canAssignIssues = userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
-  const isSuperAdmin = userRoles.includes('Super Admin')
+  const isSuperAdmin = userRoles.includes('Super Admin') || Boolean(user?.is_system_user)
+  const isBugForgePM = (userRoles.includes('Project Manager') || userRoles.includes('PM')) && (
+    user?.company_id === 1 ||
+    String(user?.company?.name || user?.company_name || '').toLowerCase() === 'bugforge'
+  )
 
   const BACKEND_TO_FRONTEND_ISSUE_TYPE = {
     Defect: 'Bug',
@@ -79,6 +83,11 @@ export default function ReportedIssuesPage() {
   const empty = { title: '', description: '', project_id: '', priority_id: '', severity_id: '', category_id: '', module_id: '', status_id: '', assigned_to: null, assigned_qa_id: null, issue_type: 'Bug', environment: '', browser: '', steps_to_reproduce: '', expected_behavior: '', actual_behavior: '', attachment_path: '', sprint_id: '' }
 
   const [issues, setIssues] = useState([])
+  const isCompanyAdminWithRequests = userRoles.includes('Admin') && (
+    user?.company_id === 1 ||
+    issues.some(i => i.requesting_company_id === user?.company_id || (user?.company_id && i.company_id === user.company_id && (isClientFeatureRequest(i) || i.issue_type === 'Feature')))
+  )
+  const canViewScopeFilters = isSuperAdmin || isBugForgePM || isCompanyAdminWithRequests
   const [statuses, setStatuses] = useState([])
   const [priorities, setPriorities] = useState([])
   const [severities, setSeverities] = useState([])
@@ -211,12 +220,12 @@ export default function ReportedIssuesPage() {
 
   useEffect(() => {
     const f = searchParams.get('filter')
-    if (f) {
+    if (f && canViewScopeFilters) {
       setActiveScopeTab(f)
     } else {
       setActiveScopeTab('all')
     }
-  }, [searchParams])
+  }, [searchParams, canViewScopeFilters])
 
   // Debounced semantic search for similar defects during creation / editing
   useEffect(() => {
@@ -748,14 +757,16 @@ export default function ReportedIssuesPage() {
 
     })
 
-    if (activeScopeTab === 'customer_requests') {
+    const effectiveScopeTab = canViewScopeFilters ? activeScopeTab : 'all'
+
+    if (effectiveScopeTab === 'customer_requests') {
       list = list.filter(i => isClientFeatureRequest(i) || i.requesting_company_id || i.issue_type === 'Feature')
-    } else if (activeScopeTab === 'unassigned_squad') {
+    } else if (effectiveScopeTab === 'unassigned_squad') {
       list = list.filter(i => (isClientFeatureRequest(i) || i.requesting_company_id || i.issue_type === 'Feature') && !i.team_id)
     }
 
     return list
-  }, [hybridResults, issues, status, project, query, activeScopeTab])
+  }, [hybridResults, issues, status, project, query, activeScopeTab, canViewScopeFilters])
 
   const isFormClosedAndReadOnly = editing && (statuses.find(s => String(s.id) === String(editing.status_id))?.name === 'Closed') && !userRoles.includes('Admin') && !userRoles.includes('Super Admin')
   const canSubmit = form.title?.trim() && form.description?.trim() && form.description?.trim().length >= 20 && !uploading && !isFormClosedAndReadOnly
@@ -1084,44 +1095,46 @@ export default function ReportedIssuesPage() {
       {/* ── LIST VIEW ── */}
       {!showForm && (
         <section className="panel-card" style={{ animation: 'fadeSlideUp .5s ease .1s both' }}>
-          {/* Quick Scope Filter Tabs for Super Admin / Team Assignment */}
-          <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-            <div className="btn-group btn-group-sm p-1 bg-light rounded-3 border">
-              <button
-                type="button"
-                className={`btn btn-sm ${activeScopeTab === 'all' ? 'btn-white bg-white text-dark shadow-xs font-semibold' : 'text-muted border-0'}`}
-                onClick={() => { setActiveScopeTab('all'); setSearchParams({}) }}
-              >
-                All Issues ({issues.length})
-              </button>
-              <button
-                type="button"
-                className={`btn btn-sm ${activeScopeTab === 'customer_requests' ? 'btn-white bg-white text-primary shadow-xs font-semibold' : 'text-muted border-0'}`}
-                onClick={() => { setActiveScopeTab('customer_requests'); setSearchParams({ filter: 'customer_requests' }) }}
-              >
-                <i className="bi bi-stars me-1 text-primary" />Customer Requests ({customerRequestsCount})
-              </button>
-              {unassignedSquadCount > 0 && (
+          {/* Quick Scope Filter Tabs for Super Admin, BugForge PM, and Requesting Company Admin */}
+          {canViewScopeFilters && (
+            <div className="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+              <div className="btn-group btn-group-sm p-1 bg-light rounded-3 border">
                 <button
                   type="button"
-                  className={`btn btn-sm ${activeScopeTab === 'unassigned_squad' ? 'btn-white bg-white text-danger shadow-xs font-semibold' : 'text-muted border-0'}`}
-                  onClick={() => { setActiveScopeTab('unassigned_squad'); setSearchParams({ filter: 'unassigned_squad' }) }}
+                  className={`btn btn-sm ${activeScopeTab === 'all' ? 'btn-white bg-white text-dark shadow-xs font-semibold' : 'text-muted border-0'}`}
+                  onClick={() => { setActiveScopeTab('all'); setSearchParams({}) }}
                 >
-                  <i className="bi bi-exclamation-triangle-fill me-1 text-danger" />Needs Squad ({unassignedSquadCount})
+                  All Issues ({issues.length})
                 </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${activeScopeTab === 'customer_requests' ? 'btn-white bg-white text-primary shadow-xs font-semibold' : 'text-muted border-0'}`}
+                  onClick={() => { setActiveScopeTab('customer_requests'); setSearchParams({ filter: 'customer_requests' }) }}
+                >
+                  <i className="bi bi-stars me-1 text-primary" />Customer Requests ({customerRequestsCount})
+                </button>
+                {unassignedSquadCount > 0 && (isSuperAdmin || isBugForgePM) && (
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${activeScopeTab === 'unassigned_squad' ? 'btn-white bg-white text-danger shadow-xs font-semibold' : 'text-muted border-0'}`}
+                    onClick={() => { setActiveScopeTab('unassigned_squad'); setSearchParams({ filter: 'unassigned_squad' }) }}
+                  >
+                    <i className="bi bi-exclamation-triangle-fill me-1 text-danger" />Needs Squad ({unassignedSquadCount})
+                  </button>
+                )}
+              </div>
+
+              {activeScopeTab !== 'all' && (
+                <span className="text-xs text-muted">
+                  Showing <strong>{filtered.length}</strong> {activeScopeTab === 'unassigned_squad' ? 'requests needing squad assignment' : 'customer feature requests'}
+                </span>
               )}
             </div>
-
-            {activeScopeTab !== 'all' && (
-              <span className="text-xs text-muted">
-                Showing <strong>{filtered.length}</strong> {activeScopeTab === 'unassigned_squad' ? 'requests needing squad assignment' : 'customer feature requests'}
-              </span>
-            )}
-          </div>
+          )}
 
           <div className="issue-filters" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <div className="search-input" style={{ position: 'relative', flex: 1, minWidth: '280px' }}>
-              <span className="input-group-text" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 }}>
+              <span className="input-group-text" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 1 ,borderColor:'white' }}>
                 {hybridLoading ? (
                   <svg style={{ animation: 'spin 1s linear infinite', width: 16, height: 16 }} fill="none" stroke="#3b82f6" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" /></svg>
                 ) : (
@@ -1130,7 +1143,7 @@ export default function ReportedIssuesPage() {
               </span>
               <input
                 className="form-control"
-                style={{ paddingLeft: '44px', height: '42px', borderRadius: '8px' }}
+                style={{ paddingLeft: '60px', height: '42px', borderRadius: '8px' }}
                 placeholder="Search issues by ID, title, or describe problem in natural language…"
                 value={query}
                 autoComplete="off"
@@ -1163,7 +1176,7 @@ export default function ReportedIssuesPage() {
             onEdit={open}
             onDelete={remove}
             canDelete={canDeleteIssue}
-            onAssignTeam={isSuperAdmin ? (iss) => {
+            onAssignTeam={(isSuperAdmin || isBugForgePM) ? (iss) => {
               setQuickAssignIssue(iss)
               setQuickTeamId(iss.team_id || '')
             } : null}

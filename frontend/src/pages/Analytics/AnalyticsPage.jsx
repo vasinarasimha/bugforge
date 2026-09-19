@@ -676,17 +676,10 @@ export default function AnalyticsPage() {
                       fontWeight="700"
                       fill="#0f172a"
                     >
-                      {kpis?.critical_open_defects ?? 0}
+                      {totalDefects}
                     </text>
-                    <text
-                      x="85"
-                      y="96"
-                      textAnchor="middle"
-                      fontSize="10"
-                      fill="#ef4444"
-                      fontWeight="600"
-                    >
-                      Crit Open
+                    <text x="85" y="96" textAnchor="middle" fontSize="10" fill="#64748b">
+                      Defects
                     </text>
                   </svg>
                 </div>

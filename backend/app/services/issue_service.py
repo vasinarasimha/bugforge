@@ -20,6 +20,40 @@ logger = logging.getLogger(__name__)
 # Fields that affect the semantic meaning of an issue
 SEMANTIC_FIELDS = {"title", "description", "category_id", "module_id", "issue_type"}
 
+# Fields to ignore completely from issue change history and UI timelines
+IGNORED_HISTORY_FIELDS = {
+    'id',
+    'issue_key',
+    'company_id',
+    'company',
+    'requesting_company_id',
+    'requesting_company',
+    'ai_root_cause_session_id',
+    'developer_fixed_at',
+    'qa_verified_at',
+    'qa_verified_by_id',
+    'created_at',
+    'updated_at',
+    'is_deleted',
+    'embedding_vector',
+}
+
+# Fields that must never be modified via standard issue update payloads
+FORBIDDEN_UPDATE_FIELDS = {
+    'id',
+    'company_id',
+    'requesting_company_id',
+    'created_at',
+    'updated_at',
+    'issue_key',
+    'embedding_vector',
+    'is_deleted',
+    'developer_fixed_at',
+    'qa_verified_at',
+    'qa_verified_by_id',
+    'ai_root_cause_session_id',
+}
+
 
 class IssueService:
     def __init__(self):
@@ -198,6 +232,8 @@ class IssueService:
         
         dumped_data = data if isinstance(data, dict) else data.model_dump(exclude_unset=True)
         for field, value in dumped_data.items():
+            if field in FORBIDDEN_UPDATE_FIELDS or field in IGNORED_HISTORY_FIELDS:
+                continue
             if isinstance(value, str) and value.strip() == '':
                 value = None
             old_value = getattr(issue, field)
@@ -566,7 +602,16 @@ class IssueService:
         from app.models.history import IssueHistory
         from sqlalchemy.orm import selectinload
         self.get(db, issue_id, company_id=company_id)
-        return db.query(IssueHistory).options(selectinload(IssueHistory.user)).filter(IssueHistory.issue_id == issue_id).order_by(IssueHistory.created_at.desc()).all()
+        return (
+            db.query(IssueHistory)
+            .options(selectinload(IssueHistory.user))
+            .filter(
+                IssueHistory.issue_id == issue_id,
+                IssueHistory.field_name.notin_(IGNORED_HISTORY_FIELDS)
+            )
+            .order_by(IssueHistory.created_at.desc())
+            .all()
+        )
 
     def get_comments(self, db: Session, issue_id: int, company_id: int | None = None):
         from app.models.comment import IssueComment
@@ -637,8 +682,8 @@ class IssueService:
         fields = [column.name for column in Issue.__table__.columns]
 
         for field in fields:
-            # Skip certain fields that shouldn't trigger history or are handled specially
-            if field in ['id', 'issue_key', 'created_at', 'updated_at', 'is_deleted', 'embedding_vector']:
+            # Skip internal/system fields that shouldn't trigger history
+            if field in IGNORED_HISTORY_FIELDS:
                 continue
 
             old_value = getattr(old_issue, field, None)
@@ -1221,6 +1266,7 @@ class IssueService:
         new_status = db.query(IssueStatus).filter(IssueStatus.id == new_status_id).first()
         if not new_status:
             return
+        old_status = db.query(IssueStatus).filter(IssueStatus.id == old_status_id).first() if old_status_id else None
 
         # 1. Closed: notify requesting customer company admin
         if (new_status.category == "closed" or new_status.name.lower() == "closed" or (new_status.is_final and new_status.category != "resolved" and new_status.name.lower() != "resolved")):
@@ -1274,3 +1320,23 @@ class IssueService:
                         entity_id=issue.id,
                         link_url=f"/issues/{issue.id}",
                     )
+
+        # 3. QA marks as Unresolved / Rework: status moved from Resolved back to In Progress / Open
+        elif (
+            (new_status.category in ("in_progress", "open") or new_status.name.lower() in ("in progress", "rework", "unresolved"))
+            and (old_status and (old_status.category == "resolved" or old_status.name.lower() in ("resolved", "verified")))
+        ):
+            label = "Feature" if getattr(issue, "issue_type", "") == "Feature" else "Defect"
+            if getattr(issue, "assigned_to", None):
+                notification_service.create_notification(
+                    db,
+                    recipient_id=issue.assigned_to,
+                    actor_id=actor.id,
+                    company_id=issue.company_id,
+                    notification_type="FEATURE_QA_REWORK",
+                    title="QA Verification: Unresolved / Rework Required",
+                    message=f"QA marked {label} {issue.issue_key} as Unresolved. Please review and fix the defect.",
+                    entity_type="ISSUE",
+                    entity_id=issue.id,
+                    link_url=f"/issues/{issue.id}",
+                )

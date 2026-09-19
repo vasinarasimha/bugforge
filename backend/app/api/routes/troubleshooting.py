@@ -35,12 +35,43 @@ async def start_troubleshooting(
     Takes the defect draft details and returns the session_id + first question.
     Restricted to Bug / Defect issue types.
     """
-    if req.issue_type not in ("Bug", "Defect"):
+    if req.issue_id:
+        from app.models.issue import Issue
+        issue = db.query(Issue).filter(Issue.id == req.issue_id).first()
+        if not issue:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
+        defect_draft = {
+            "title": req.title or issue.title,
+            "description": req.description or issue.description,
+            "project_id": req.project_id or issue.project_id,
+            "priority_id": req.priority_id or issue.priority_id,
+            "severity_id": req.severity_id or issue.severity_id,
+            "status_id": req.status_id or issue.status_id,
+            "issue_type": req.issue_type or issue.issue_type,
+            "category_id": req.category_id or issue.category_id,
+            "module_id": req.module_id or issue.module_id,
+            "assigned_to": req.assigned_to or issue.assigned_to,
+            "environment": req.environment or issue.environment,
+            "browser": req.browser or issue.browser,
+            "operating_system": req.operating_system or issue.operating_system,
+            "reproduction_steps": req.reproduction_steps or issue.reproduction_steps,
+            "expected_behavior": req.expected_behavior or issue.expected_behavior,
+            "actual_behavior": req.actual_behavior or issue.actual_behavior,
+        }
+    else:
+        if not req.title or not req.description or not req.project_id or not req.priority_id or not req.severity_id or not req.status_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required fields: title, description, project_id, priority_id, severity_id, status_id"
+            )
+        defect_draft = req.model_dump()
+
+    if defect_draft.get("issue_type") not in ("Bug", "Defect"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"AI Root-Cause Analysis is only available for Bug/Defect issue types. Got: '{req.issue_type}'."
+            detail=f"AI Root-Cause Analysis is only available for Bug/Defect issue types. Got: '{defect_draft.get('issue_type')}'."
         )
-    defect_draft = req.model_dump()
+
     return troubleshooting_service.start_session(db, user, defect_draft)
 
 

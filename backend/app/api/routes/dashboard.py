@@ -19,7 +19,7 @@ from app.models.history import IssueHistory
 from sqlalchemy.orm import joinedload, selectinload
 from app.repositories.user_repository import UserRepository
 from app.schemas.dashboard import DashboardStatistics
-from app.services.issue_service import IssueService
+from app.services.issue_service import IssueService, IGNORED_HISTORY_FIELDS
 from app.services.project_service import ProjectService
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -116,7 +116,8 @@ async def pm_stats(
     recent_history_records = []
     if pm_project_ids:
         recent_history_records = db.query(IssueHistory).join(Issue).filter(
-            Issue.project_id.in_(pm_project_ids)
+            Issue.project_id.in_(pm_project_ids),
+            IssueHistory.field_name.notin_(IGNORED_HISTORY_FIELDS)
         ).order_by(IssueHistory.created_at.desc()).limit(8).all()
     recent_history_serialized = [{"id": h.id, "field_name": h.field_name, "old_value": h.old_value, "new_value": h.new_value, "created_at": h.created_at.isoformat()} for h in recent_history_records]
 
@@ -260,7 +261,8 @@ async def tl_stats(
     recent_history_records = []
     if tl_project_ids:
         recent_history_records = db.query(IssueHistory).join(Issue).filter(
-            Issue.project_id.in_(tl_project_ids)
+            Issue.project_id.in_(tl_project_ids),
+            IssueHistory.field_name.notin_(IGNORED_HISTORY_FIELDS)
         ).order_by(IssueHistory.created_at.desc()).limit(8).all()
     recent_history_serialized = [{"id": h.id, "field_name": h.field_name, "old_value": h.old_value, "new_value": h.new_value, "created_at": h.created_at.isoformat()} for h in recent_history_records]
 
@@ -367,7 +369,10 @@ async def dev_stats(
     for i in dev_issues:
         issues_by_type[i.issue_type or "Defect"] += 1
 
-    recent_history_q = db.query(IssueHistory).join(Issue).filter(Issue.assigned_to == current_user.id)
+    recent_history_q = db.query(IssueHistory).join(Issue).filter(
+        Issue.assigned_to == current_user.id,
+        IssueHistory.field_name.notin_(IGNORED_HISTORY_FIELDS)
+    )
     if cid is not None:
         recent_history_q = recent_history_q.filter(
             (Issue.company_id == cid) | (Issue.requesting_company_id == cid)

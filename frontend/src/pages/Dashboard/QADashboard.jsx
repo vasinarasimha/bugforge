@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
-import { getIssues, updateIssue, updateIssueStatus } from '../../services/issueService'
+import { getIssues, getStatuses, updateIssue, updateIssueStatus } from '../../services/issueService'
 import IssueTable from '../../components/IssueTable/IssueTable'
 import StatCard from '../../components/StatCard/StatCard'
 
@@ -9,11 +9,18 @@ export default function QADashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [issues, setIssues] = useState([])
+  const [statuses, setStatuses] = useState([])
   const [error, setError] = useState('')
 
   const load = () => {
-    getIssues()
-      .then(({ data }) => setIssues(data))
+    Promise.all([
+      getIssues(),
+      getStatuses().catch(() => ({ data: [] }))
+    ])
+      .then(([issuesRes, statusesRes]) => {
+        setIssues(issuesRes.data || [])
+        setStatuses(statusesRes.data || [])
+      })
       .catch(() => setError('Unable to load QA issues'))
   }
 
@@ -22,14 +29,17 @@ export default function QADashboard() {
   const handleAction = async (issue, action) => {
     try {
       if (action === 'resolve') {
-        // Technically sending to Reporter or closing. We will Close it for simplicity as per 4-step workflow
-        await updateIssueStatus(issue.id, { status_id: 4 }) // 4 = Closed
+        const closedStatus = statuses.find(s => s.category === 'closed' || s.name.toLowerCase() === 'closed')
+        const targetId = closedStatus ? closedStatus.id : (statuses.find(s => s.is_final)?.id || 4)
+        await updateIssueStatus(issue.id, { status_id: targetId })
       } else if (action === 'unresolve') {
-        await updateIssueStatus(issue.id, { status_id: 2 }) // 2 = In Progress
+        const inProgStatus = statuses.find(s => s.category === 'in_progress' || s.name.toLowerCase() === 'in progress')
+        const targetId = inProgStatus ? inProgStatus.id : 2
+        await updateIssueStatus(issue.id, { status_id: targetId })
       }
       load()
     } catch (e) {
-      setError('Failed to update issue status')
+      setError(e.response?.data?.detail || 'Failed to update issue status')
     }
   }
 

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import Sidebar from '../components/Sidebar/Sidebar'
 import Navbar from '../components/Navbar/Navbar'
 import { useAuth } from '../hooks/useAuth'
+import CopilotDrawer from '../components/Copilot/CopilotDrawer'
 
 const titles = {
   '/dashboard': 'Dashboard',
@@ -35,6 +36,7 @@ export default function DashboardLayout() {
           <Outlet />
         </div>
       </main>
+      <CopilotDrawer />
     </div>
   )
 }
