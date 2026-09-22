@@ -131,6 +131,7 @@ def project_team_setup(db_session: Session):
             team_id=team.id,
             project_manager_id=pm_user.id,
             team_leader_id=tl_user.id,
+            created_by=admin_user.id,
             is_active=True,
         )
         db_session.add(proj)
@@ -139,6 +140,8 @@ def project_team_setup(db_session: Session):
         proj.team_id = team.id
         proj.project_manager_id = pm_user.id
         proj.team_leader_id = tl_user.id
+        if not proj.created_by:
+            proj.created_by = admin_user.id
         db_session.flush()
 
     db_session.commit()

@@ -85,6 +85,12 @@ class ProjectService:
                 f"A project with name '{data.name.strip()}' already exists in this company."
             )
 
+        creator_id = getattr(user, "id", None)
+        if creator_id is None or not isinstance(creator_id, int) or isinstance(creator_id, bool):
+            from app.models.user import User as UserModel
+            fallback_u = db.query(UserModel).filter(UserModel.company_id == company_id).first()
+            creator_id = fallback_u.id if fallback_u else 1
+
         project = Project(
             name=data.name.strip(),
             key=data.key.strip().upper(),
@@ -100,7 +106,7 @@ class ProjectService:
             project_manager_id=project_manager_id,
             team_leader_id=team_leader_id,
             company_id=company_id,
-            created_by=user.id
+            created_by=creator_id
         )
         return self.repository.create(db, project)
 
