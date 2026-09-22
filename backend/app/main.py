@@ -63,6 +63,22 @@ async def daily_read_notifications_cleanup_loop():
         await asyncio.sleep(86400)
 
 
+def ensure_schema_migrations():
+    """Ensure newly added columns exist in database tables."""
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                ALTER TABLE projects
+                ADD COLUMN IF NOT EXISTS team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL;
+            """))
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Schema migration check skipped/failed: {e}")
+
+ensure_schema_migrations()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(daily_read_notifications_cleanup_loop())

@@ -3,6 +3,7 @@ import ProjectTable from '../../components/ProjectTable/ProjectTable'
 import Modal from '../../components/Modal/Modal'
 import { createProject, deleteProject, getProjects, updateProject, getProjectHistory } from '../../services/projectService'
 import { getUsers } from '../../services/authService'
+import { getTeams } from '../../services/teamService'
 import { useAuth } from '../../hooks/useAuth'
 import { getFieldLabel, isIgnoredTimelineField } from '../../utils/activityHelper'
 import { useLocation } from 'react-router-dom'
@@ -14,7 +15,7 @@ export default function ProjectsPage() {
 
   const userRoles = user?.roles?.map(r => r.name) || []
   const isAdmin = user?.role === 'Admin' || user?.role === 'Super Admin' || userRoles.includes('Admin') || userRoles.includes('Super Admin')
-  const isProjectManager = userRoles.includes('Project Manager')
+  const isProjectManager = userRoles.includes('Project Manager') || user?.role === 'Project Manager'
   const canEditProjects = isAdmin || isProjectManager
   const canDeleteProjects = isAdmin  // Only Admin can delete per requirements
 
@@ -29,6 +30,8 @@ export default function ProjectsPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [users, setUsers] = useState([])
   const [usersLoading, setUsersLoading] = useState(true)
+  const [teams, setTeams] = useState([])
+  const [teamsLoading, setTeamsLoading] = useState(true)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyRecords, setHistoryRecords] = useState([])
   const emptyForm = {
@@ -41,11 +44,25 @@ export default function ProjectsPage() {
     end_date: '',
     budget: '',
     tech_stack: '',
-    project_manager_id: null,
-    team_leader_id: null
+    team_id: null
   }
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState('')
+
+  const selectedTeam = teams.find(t => t.id === form.team_id)
+
+  const loadTeams = async () => {
+    try {
+      setTeamsLoading(true)
+      const { data } = await getTeams()
+      setTeams(data || [])
+    } catch (err) {
+      console.error('Failed to load teams:', err)
+      setTeams([])
+    } finally {
+      setTeamsLoading(false)
+    }
+  }
 
   const loadUsers = async () => {
     try {
@@ -72,6 +89,7 @@ export default function ProjectsPage() {
   }
 
   useEffect(() => {
+    loadTeams().catch(() => {})
     loadUsers().catch(() => setError('Unable to load users.'))
     load().catch(() => setError('Unable to load projects.'))
   }, [])
@@ -88,8 +106,7 @@ export default function ProjectsPage() {
       end_date: project.end_date ? project.end_date.split('T')[0] : '',
       budget: project.budget || '',
       tech_stack: project.tech_stack || '',
-      project_manager_id: project.project_manager_id || null,
-      team_leader_id: project.team_leader_id || null
+      team_id: project.team_id || null
     } : emptyForm)
     setError('')
     setShowModal(true)
@@ -104,8 +121,7 @@ export default function ProjectsPage() {
         key: form.project_name.substring(0, 3).toUpperCase() + Math.floor(100 + Math.random() * 900),
         start_date: form.start_date ? new Date(form.start_date).toISOString() : null,
         end_date: form.end_date ? new Date(form.end_date).toISOString() : null,
-        project_manager_id: form.project_manager_id || null,
-        team_leader_id: form.team_leader_id || null
+        team_id: form.team_id || null
       }
       editing ? await updateProject(editing.id, payload) : await createProject(payload)
       setShowModal(false)
@@ -279,33 +295,36 @@ export default function ProjectsPage() {
                   </div>
                 </div>
 
-                {/* Project Manager & Team Leader Selects */}
+                {/* Assigned Team Select */}
                 <div className="row mb-3">
-                  <div className="col-md-6">
-                    <label className="form-label">Project Manager</label>
+                  <div className="col-12">
+                    <label className="form-label">Assigned Team</label>
                     <SearchableSelect
-                      placeholder="Select Project Manager..."
+                      placeholder="Select Team to assign to project..."
                       isClearable
-                      options={users.map(u => ({ value: u.id, label: u.full_name }))}
-                      value={form.project_manager_id || null}
-                      onChange={(val) => setForm({ ...form, project_manager_id: val ? parseInt(val) : null })}
+                      options={teams.map(t => ({
+                        value: t.id,
+                        label: `${t.name}${t.team_leader?.full_name ? ` (TL: ${t.team_leader.full_name})` : ''}${t.project_manager?.full_name ? ` | PM: ${t.project_manager.full_name}` : ''}`
+                      }))}
+                      value={form.team_id || null}
+                      onChange={(val) => setForm({ ...form, team_id: val ? parseInt(val) : null })}
                     />
-                    {usersLoading && form.project_manager_id === null && (
-                      <div className="text-small text-muted mt-1">Loading users...</div>
+                    {teamsLoading && form.team_id === null && (
+                      <div className="text-small text-muted mt-1">Loading teams...</div>
                     )}
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label">Team Leader</label>
-                    <SearchableSelect
-                      placeholder="Select Team Leader..."
-                      isClearable
-                      options={users.map(u => ({ value: u.id, label: u.full_name }))}
-                      value={form.team_leader_id || null}
-                      onChange={(val) => setForm({ ...form, team_leader_id: val ? parseInt(val) : null })}
-                    />
-                    {usersLoading && form.team_leader_id === null && (
-                      <div className="text-small text-muted mt-1">Loading users...</div>
+                    {selectedTeam && (
+                      <div className="p-2.5 mt-2 rounded-3 border bg-light small text-muted d-flex flex-wrap align-items-center gap-3">
+                        <div><i className="bi bi-people-fill text-primary me-1" /> Team: <strong className="text-dark">{selectedTeam.name}</strong></div>
+                        <div><i className="bi bi-person-badge text-indigo me-1" /> PM: <strong className="text-dark">{selectedTeam.project_manager?.full_name || 'Unassigned'}</strong></div>
+                        <div><i className="bi bi-star-fill text-warning me-1" /> TL: <strong className="text-dark">{selectedTeam.team_leader?.full_name || 'Unassigned'}</strong></div>
+                        {selectedTeam.member_count > 0 && (
+                          <div><i className="bi bi-person-check text-success me-1" /> {selectedTeam.member_count} Member{selectedTeam.member_count > 1 ? 's' : ''}</div>
+                        )}
+                      </div>
                     )}
+                    <div className="form-text text-muted small mt-1">
+                      Assigning a team automatically links the project to that team's Project Manager, Team Leader, and Members.
+                    </div>
                   </div>
                 </div>
               </div>

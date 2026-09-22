@@ -33,6 +33,8 @@ function getNotificationIcon(type) {
       return { icon: 'bi-arrow-repeat', color: '#ef4444' }
     case 'FEATURE_CLOSED':
       return { icon: 'bi-check-circle-fill', color: '#10b981' }
+    case 'DEFECT_CREATED':
+      return { icon: 'bi-bug-fill', color: '#ef4444' }
     default:
       return { icon: 'bi-bell-fill', color: '#6366f1' }
   }
@@ -71,14 +73,13 @@ export default function NotificationDropdown({ isOpen, onClose, onCountChange })
   }, [isOpen, onClose])
 
   const loadNotifications = async () => {
-    setLoading(true)
-    setError('')
     try {
+      setLoading(true)
+      setError('')
       const data = await notificationApi.getMyNotifications(false, 30, 0)
-      setNotifications(data.items || [])
-      if (onCountChange) {
-        onCountChange(data.unread_count || 0)
-      }
+      setNotifications(data || [])
+      const unread = (data || []).filter((n) => !n.is_read).length
+      if (onCountChange) onCountChange(unread)
     } catch (err) {
       console.error('Failed to load notifications:', err)
       setError('Unable to load notifications.')
@@ -94,9 +95,8 @@ export default function NotificationDropdown({ isOpen, onClose, onCountChange })
         setNotifications((prev) =>
           prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n))
         )
-        if (onCountChange) {
-          onCountChange((prev) => Math.max(0, prev - 1))
-        }
+        const newUnread = notifications.filter((n) => !n.is_read && n.id !== notif.id).length
+        if (onCountChange) onCountChange(newUnread)
       } catch (err) {
         console.error('Failed to mark notification as read:', err)
       }
@@ -106,6 +106,7 @@ export default function NotificationDropdown({ isOpen, onClose, onCountChange })
     const isIssueNotification =
       notif.entity_type?.toLowerCase() === 'issue' ||
       notif.notification_type?.toLowerCase().includes('feature') ||
+      notif.notification_type?.toLowerCase().includes('defect') ||
       notif.notification_type?.toLowerCase().includes('issue')
     const matchId = notif.link_url?.match(/\/issues\/(\d+)/)?.[1]
     const targetIssueId = notif.entity_id || (matchId ? Number(matchId) : null)

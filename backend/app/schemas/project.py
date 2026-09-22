@@ -14,6 +14,7 @@ class ProjectCreate(BaseModel):
     end_date: datetime | None = None
     budget: str | None = None
     tech_stack: str | None = None
+    team_id: int | None = None
     project_manager_id: int | None = None
     team_leader_id: int | None = None
 
@@ -41,6 +42,8 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
     is_active: bool
     issue_count: int = 0
+    team_id: int | None = None
+    team_name: str | None = None
     project_manager_id: int | None = None
     team_leader_id: int | None = None
     project_manager_name: str | None = None

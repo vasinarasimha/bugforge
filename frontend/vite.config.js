@@ -5,7 +5,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     allowedHosts: [
-      'secrets-bio-wear-else.trycloudflare.com',
       'http://localhost:5173'
     ],
     proxy: {

@@ -266,6 +266,24 @@ class TroubleshootingService:
         """
         ts = self._get_session(db, session_uuid)
         self._check_ownership(ts, user)
+
+        # Idempotency check: return existing issue if session was already completed or issue already created
+        from app.models.issue import Issue
+        existing_issue = db.query(Issue).filter(Issue.ai_root_cause_session_id == ts.id).first()
+        if existing_issue or ts.status == "completed":
+            if not existing_issue and getattr(ts, 'id', None):
+                existing_issue = db.query(Issue).filter(Issue.ai_root_cause_session_id == ts.id).first()
+            if existing_issue:
+                return {
+                    "issue_id": existing_issue.id,
+                    "issue_key": existing_issue.issue_key,
+                    "session_id": ts.session_uuid,
+                    "root_cause": ts.root_cause,
+                    "confidence": ts.confidence,
+                    "status": "completed",
+                    "similar_issues": [],
+                }
+
         self._check_status(ts, {"confirmed", "insufficient_evidence"}, "confirm and create issue")
 
         # Build issue data from the defect draft + any overrides

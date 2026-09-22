@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   startTroubleshooting,
@@ -16,6 +16,9 @@ export default function TroubleshootingModal({
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  const isConfirmingRef = useRef(false)
+  const isSkippingRef = useRef(false)
 
   // Current question data
   const [questionData, setQuestionData] = useState(null)
@@ -68,6 +71,8 @@ export default function TroubleshootingModal({
   }
 
   const handleSkip = () => {
+    if (isSkippingRef.current || isConfirmingRef.current || loading) return
+    isSkippingRef.current = true
     console.log("[TroubleshootingModal] handleSkip called, bypassing AI")
     handleCancel()
     onSkip()
@@ -122,7 +127,8 @@ export default function TroubleshootingModal({
   }
 
   const handleConfirmAndCreate = async () => {
-    if (loading) return
+    if (isConfirmingRef.current || isSkippingRef.current || loading) return
+    isConfirmingRef.current = true
     console.log("[TroubleshootingModal] handleConfirmAndCreate called")
     setLoading(true)
     setError('')
@@ -131,6 +137,7 @@ export default function TroubleshootingModal({
       console.log("[TroubleshootingModal] Issue created with AI root cause:", data)
       onConfirm(data)
     } catch (err) {
+      isConfirmingRef.current = false
       console.error("[TroubleshootingModal] Error confirming issue:", err)
       setError(err.response?.data?.detail || 'Failed to create issue.')
       setLoading(false)
@@ -347,9 +354,14 @@ export default function TroubleshootingModal({
     if (session?.status === 'confirmed' || session?.status === 'insufficient_evidence') {
       return (
         <div className="tm-modal-footer">
-          <button className="tm-btn-secondary" onClick={handleCancel}>Cancel</button>
-          <button className="tm-btn-primary" onClick={handleConfirmAndCreate} disabled={loading}>
-            {loading ? 'Creating Issue...' : 'Confirm & Create Issue'}
+          <button className="tm-btn-secondary" onClick={handleCancel} disabled={loading || isConfirmingRef.current}>Cancel</button>
+          <button
+            className="tm-btn-primary"
+            onClick={handleConfirmAndCreate}
+            disabled={loading || isConfirmingRef.current}
+            style={{ pointerEvents: (loading || isConfirmingRef.current) ? 'none' : 'auto' }}
+          >
+            {loading || isConfirmingRef.current ? 'Creating Issue...' : 'Confirm & Create Issue'}
           </button>
         </div>
       )
@@ -357,8 +369,15 @@ export default function TroubleshootingModal({
 
     return (
       <div className="tm-modal-footer" style={{ justifyContent: 'space-between' }}>
-        <button className="tm-btn-text" onClick={handleSkip} disabled={loading}>Skip AI Analysis</button>
-        <button className="tm-btn-secondary" onClick={handleCancel} disabled={loading}>Cancel</button>
+        <button
+          className="tm-btn-text"
+          onClick={handleSkip}
+          disabled={loading || isSkippingRef.current}
+          style={{ pointerEvents: (loading || isSkippingRef.current) ? 'none' : 'auto' }}
+        >
+          Skip AI Analysis
+        </button>
+        <button className="tm-btn-secondary" onClick={handleCancel} disabled={loading || isSkippingRef.current}>Cancel</button>
       </div>
     )
   }

@@ -201,6 +201,17 @@ class IssueService:
 
         issue_key = self._generate_next_issue_key(db, project.key)
 
+        # Directly assign squad for BugForge project defects reported by BugForge employees
+        bf_comp = self._get_or_create_bugforge_company(db)
+        is_bf_project = bool(project and (project.company_id == bf_comp.id or project.key == "BF" or (getattr(project, 'name', '') and project.name.lower() == "bugforge")))
+        is_bf_employee = bool(user.company_id == bf_comp.id or (getattr(user, 'company', None) and getattr(user.company, 'name', '').lower() == "bugforge") or (not user.company_id and is_super_admin))
+        is_defect = bool(data.issue_type in ["Defect", "Bug"] or issue_data.get("issue_type") in ["Defect", "Bug"])
+
+        if is_bf_project and is_bf_employee and is_defect and not issue_data.get('team_id'):
+            user_team = self._get_user_team(db, user, bf_comp.id)
+            if user_team:
+                issue_data['team_id'] = user_team.id
+
         # Resolve category/module names for richer embedding
         category_name, module_name = self._resolve_names_for_embedding(
             db, issue_data.get('category_id'), issue_data.get('module_id')
@@ -217,7 +228,38 @@ class IssueService:
         if embedding is not None:
             issue_data['embedding_vector'] = embedding
 
-        return self.repository.create(db, Issue(**issue_data, reporter_id=user.id, issue_key=issue_key))
+        created_issue = self.repository.create(db, Issue(**issue_data, reporter_id=user.id, issue_key=issue_key))
+
+        # Notify PM and TL of the project when a defect is created so they can assign developer and QA
+        if is_defect and project:
+            from app.services.notification_service import notification_service
+            recipients = set()
+            if getattr(project, "team", None):
+                if project.team.project_manager_id:
+                    recipients.add(project.team.project_manager_id)
+                if project.team.team_leader_id:
+                    recipients.add(project.team.team_leader_id)
+            if getattr(project, "project_manager_id", None):
+                recipients.add(project.project_manager_id)
+            if getattr(project, "team_leader_id", None):
+                recipients.add(project.team_leader_id)
+
+            proj_name = getattr(project, "name", "Project")
+            for rid in recipients:
+                notification_service.create_notification(
+                    db,
+                    recipient_id=rid,
+                    actor_id=user.id,
+                    company_id=created_issue.company_id,
+                    notification_type="DEFECT_CREATED",
+                    title="New Defect Created: Assign Developer & QA",
+                    message=f"New defect '{created_issue.title}' ({created_issue.issue_key}) created in project '{proj_name}'. Please assign a Developer and QA.",
+                    entity_type="ISSUE",
+                    entity_id=created_issue.id,
+                    link_url=f"/issues/{created_issue.id}",
+                )
+
+        return created_issue
 
     def update(self, db: Session, issue_id: int, data: IssueUpdate, user: User):
         issue = self.get(db, issue_id, company_id=user.company_id)
@@ -835,6 +877,21 @@ class IssueService:
             db.commit()
             db.refresh(proj)
         return proj
+
+    def _get_user_team(self, db: Session, user: User, company_id: int | None = None):
+        from app.models.team import Team, TeamMember
+        from sqlalchemy import or_
+        query = db.query(Team).outerjoin(Team.members).filter(Team.is_active == True)
+        if company_id is not None:
+            query = query.filter(Team.company_id == company_id)
+        query = query.filter(
+            or_(
+                TeamMember.user_id == user.id,
+                Team.team_leader_id == user.id,
+                Team.project_manager_id == user.id,
+            )
+        )
+        return query.first()
 
     def submit_feature_request(
         self,

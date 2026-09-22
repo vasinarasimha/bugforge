@@ -1,10 +1,11 @@
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from sqlalchemy.orm import Session, selectinload
 
 
 
 from app.models.project import Project
+from app.models.team import Team
 
 
 
@@ -14,7 +15,7 @@ class ProjectRepository:
 
     def list(self, db: Session, search: str | None = None, limit: int | None = None, offset: int | None = None, company_id: int | None = None) -> list:
         print("repositories/project_repository.py Fetching all projects from the database")
-        query = select(Project).options(selectinload(Project.creator), selectinload(Project.issues)).where(Project.is_active == True)
+        query = select(Project).options(selectinload(Project.creator), selectinload(Project.issues), selectinload(Project.team)).where(Project.is_active == True)
         if company_id is not None:
             query = query.where(Project.company_id == company_id)
         if search:
@@ -28,7 +29,10 @@ class ProjectRepository:
 
     def list_by_manager(self, db: Session, manager_id: int, search: str | None = None, limit: int | None = None, offset: int | None = None, company_id: int | None = None) -> list:
         print(f"repositories/project_repository.py Fetching projects for manager ID: {manager_id} from the database")
-        query = select(Project).options(selectinload(Project.creator), selectinload(Project.issues)).where(Project.project_manager_id == manager_id, Project.is_active == True)
+        query = select(Project).options(selectinload(Project.creator), selectinload(Project.issues), selectinload(Project.team)).where(
+            or_(Project.project_manager_id == manager_id, Project.team.has(Team.project_manager_id == manager_id)),
+            Project.is_active == True
+        )
         if company_id is not None:
             query = query.where(Project.company_id == company_id)
         if search:
@@ -42,7 +46,10 @@ class ProjectRepository:
 
     def list_by_leader(self, db: Session, leader_id: int, search: str | None = None, limit: int | None = None, offset: int | None = None, company_id: int | None = None) -> list:
         print(f"repositories/project_repository.py Fetching projects for leader ID: {leader_id} from the database")
-        query = select(Project).options(selectinload(Project.creator), selectinload(Project.issues)).where(Project.team_leader_id == leader_id, Project.is_active == True)
+        query = select(Project).options(selectinload(Project.creator), selectinload(Project.issues), selectinload(Project.team)).where(
+            or_(Project.team_leader_id == leader_id, Project.team.has(Team.team_leader_id == leader_id)),
+            Project.is_active == True
+        )
         if company_id is not None:
             query = query.where(Project.company_id == company_id)
         if search:
@@ -56,7 +63,7 @@ class ProjectRepository:
 
     def get(self, db: Session, project_id: int, company_id: int | None = None) -> Project | None:
         print(f"repositories/project_repository.py Fetching project with ID {project_id} from the database")
-        query = select(Project).options(selectinload(Project.creator), selectinload(Project.issues)).where(Project.id == project_id, Project.is_active == True)
+        query = select(Project).options(selectinload(Project.creator), selectinload(Project.issues), selectinload(Project.team)).where(Project.id == project_id, Project.is_active == True)
         if company_id is not None:
             query = query.where(Project.company_id == company_id)
         return db.scalar(query)

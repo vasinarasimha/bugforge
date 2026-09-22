@@ -209,6 +209,7 @@ class CopilotService:
 
         except Exception as e:
             logger.error(f"Copilot chat error for user {current_user.id}: {e}", exc_info=True)
+            print(f"Copilot chat error for user {current_user.id}: {e}")
             return {
                 "reply": "I encountered an error while processing your request. Please try again in a moment.",
                 "tools_used": tools_used,

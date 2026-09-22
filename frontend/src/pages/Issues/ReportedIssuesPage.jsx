@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useLocation, useSearchParams, useParams } from 'react-router-dom'
 import IssueTable, { isClientFeatureRequest } from '../../components/IssueTable/IssueTable'
 import Modal from '../../components/Modal/Modal'
@@ -61,7 +61,7 @@ export default function ReportedIssuesPage() {
   const { id: routeIssueId } = useParams()
   const userRole = user?.role || user?.roles?.[0]?.name || ''
   const userRoles = user?.roles?.map(r => r.name) || [userRole]
-  const canDeleteIssue = ['Admin', 'Super Admin', 'QA', 'Project Manager'].includes(userRole) || userRoles.some(r => ['Admin', 'Super Admin', 'QA', 'Project Manager'].includes(r))
+  const canDeleteIssue = ['Admin', 'Super Admin', 'Project Manager'].includes(userRole) || userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager'].includes(r))
   const canAccessTestIntelligence = userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
   const canAssignIssues = userRoles.some(r => ['Admin', 'Super Admin', 'Project Manager', 'PM', 'Team Leader', 'TL', 'QA'].includes(r))
   const isSuperAdmin = userRoles.includes('Super Admin') || Boolean(user?.is_system_user)
@@ -676,7 +676,11 @@ export default function ReportedIssuesPage() {
   }
 
 
+  const isHandlingTroubleshootRef = useRef(false)
+
   const handleTroubleshootingConfirm = async (createdIssueData) => {
+    if (isHandlingTroubleshootRef.current) return
+    isHandlingTroubleshootRef.current = true
     console.log("[ReportedIssuesPage] Troubleshooting confirmed, issue created:", createdIssueData)
     setShowTroubleshootingModal(false)
     setShowForm(false)
@@ -687,9 +691,12 @@ export default function ReportedIssuesPage() {
       })))
     }
     await load()
+    isHandlingTroubleshootRef.current = false
   }
 
   const handleTroubleshootingSkip = async () => {
+    if (isHandlingTroubleshootRef.current) return
+    isHandlingTroubleshootRef.current = true
     console.log("[ReportedIssuesPage] AI skipped, submitting issue directly...")
     setUploading(true)
     try {
@@ -708,6 +715,7 @@ export default function ReportedIssuesPage() {
       setError(e.response?.data?.detail || 'Unable to save issue.')
     } finally {
       setUploading(false)
+      isHandlingTroubleshootRef.current = false
     }
   }
 

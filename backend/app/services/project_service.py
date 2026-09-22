@@ -52,7 +52,19 @@ class ProjectService:
         company_id = getattr(data, 'company_id', None) if is_super else (user.company_id or 1)
         if not company_id:
             company_id = user.company_id or 1
-        self._validate_members(db, data.project_manager_id, data.team_leader_id, company_id)
+
+        team = None
+        if data.team_id:
+            from app.models.team import Team
+            team = db.query(Team).filter(Team.id == data.team_id).first()
+            if not team:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected team does not exist")
+            if company_id is not None and team.company_id != company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot assign team from another company")
+
+        project_manager_id = (team.project_manager_id if team else None) or data.project_manager_id
+        team_leader_id = (team.team_leader_id if team else None) or data.team_leader_id
+        self._validate_members(db, project_manager_id, team_leader_id, company_id)
 
         # Check duplicate key or name in this company
         existing_proj = db.query(Project).filter(
@@ -84,8 +96,9 @@ class ProjectService:
             end_date=data.end_date,
             budget=data.budget,
             tech_stack=data.tech_stack,
-            project_manager_id=data.project_manager_id,
-            team_leader_id=data.team_leader_id,
+            team_id=data.team_id,
+            project_manager_id=project_manager_id,
+            team_leader_id=team_leader_id,
             company_id=company_id,
             created_by=user.id
         )
@@ -95,7 +108,19 @@ class ProjectService:
         print(f"services/project_service.py Updating project with ID {project_id}")
         effective_cid = get_effective_company_id(user)
         project = self.get(db, project_id, company_id=effective_cid)
-        self._validate_members(db, data.project_manager_id, data.team_leader_id, project.company_id)
+
+        team = None
+        if data.team_id:
+            from app.models.team import Team
+            team = db.query(Team).filter(Team.id == data.team_id).first()
+            if not team:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Selected team does not exist")
+            if project.company_id is not None and team.company_id != project.company_id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot assign team from another company")
+
+        project_manager_id = (team.project_manager_id if team else None) or data.project_manager_id
+        team_leader_id = (team.team_leader_id if team else None) or data.team_leader_id
+        self._validate_members(db, project_manager_id, team_leader_id, project.company_id)
         
         project.name = data.name.strip()
         project.key = data.key.strip().upper()
@@ -107,8 +132,9 @@ class ProjectService:
         project.end_date = data.end_date
         project.budget = data.budget
         project.tech_stack = data.tech_stack
-        project.project_manager_id = data.project_manager_id
-        project.team_leader_id = data.team_leader_id
+        project.team_id = data.team_id
+        project.project_manager_id = project_manager_id
+        project.team_leader_id = team_leader_id
         
         db.commit()
         db.refresh(project)

@@ -15,6 +15,11 @@ router = APIRouter(prefix="/projects", tags=["Projects"])
 service = ProjectService()
 
 def serialize(p):
+    team_obj = getattr(p, "team", None)
+    pm_id = p.project_manager_id or (team_obj.project_manager_id if team_obj else None)
+    tl_id = p.team_leader_id or (team_obj.team_leader_id if team_obj else None)
+    pm_name = p.project_manager.full_name if p.project_manager else (team_obj.project_manager.full_name if team_obj and team_obj.project_manager else "")
+    tl_name = p.team_leader.full_name if p.team_leader else (team_obj.team_leader.full_name if team_obj and team_obj.team_leader else "")
     return {
         "id": p.id,
         "name": p.name,
@@ -33,10 +38,12 @@ def serialize(p):
         "updated_at": p.updated_at,
         "is_active": p.is_active,
         "issue_count": len(p.issues),
-        "project_manager_id": p.project_manager_id,
-        "project_manager_name": p.project_manager.full_name if p.project_manager else "",
-        "team_leader_id": p.team_leader_id,
-        "team_leader_name": p.team_leader.full_name if p.team_leader else ""
+        "team_id": p.team_id,
+        "team_name": team_obj.name if team_obj else None,
+        "project_manager_id": pm_id,
+        "project_manager_name": pm_name,
+        "team_leader_id": tl_id,
+        "team_leader_name": tl_name
     }
 
 @router.get("", response_model=list[ProjectResponse])
@@ -53,17 +60,8 @@ async def list_projects(
 
     if "Super Admin" in user_roles:
         projects = service.list(db, search=search, limit=limit, offset=offset)
-    elif "Admin" in user_roles:
-        # Admin sees all projects within company
-        projects = service.list(db, search=search, limit=limit, offset=offset, company_id=cid)
-    elif "Project Manager" in user_roles:
-        # Project Manager sees only their assigned projects within company
-        projects = service.list_by_manager(db, current_user.id, search=search, limit=limit, offset=offset, company_id=cid)
-    elif "Team Leader" in user_roles:
-        # Team Leader sees only their assigned projects within company
-        projects = service.list_by_leader(db, current_user.id, search=search, limit=limit, offset=offset, company_id=cid)
     else:
-        # Others (Developer, QA, Reporter) see all active projects within company for context
+        # Admin, Project Manager, Team Leader, Developer, QA, Reporter all see active company projects
         projects = service.list(db, search=search, limit=limit, offset=offset, company_id=cid)
 
     return [serialize(p) for p in projects]
@@ -80,14 +78,10 @@ async def get_project(project_id: int, db: Annotated[Session, Depends(get_db)], 
 
     # Check if user has access to this project
     has_access = False
-    if "Super Admin" in user_roles or "Admin" in user_roles:
+    if "Super Admin" in user_roles:
         has_access = True
-    elif "Project Manager" in user_roles and project.project_manager_id == current_user.id:
-        has_access = True
-    elif "Team Leader" in user_roles and project.team_leader_id == current_user.id:
-        has_access = True
-    elif "Developer" in user_roles or "QA" in user_roles or "Reporter" in user_roles:
-        # These roles can see all projects for context (but may have limited issue visibility)
+    elif cid is None or project.company_id == cid:
+        # All authenticated company users (Admin, PM, TL, Developer, QA, Reporter) can access company projects
         has_access = True
 
     if not has_access:
@@ -137,9 +131,9 @@ async def delete_project(project_id: int, db: Annotated[Session, Depends(get_db)
 
 @router.get("/{project_id}/history", response_model=list[dict])
 async def get_project_history(project_id: int, db: Annotated[Session, Depends(get_db)], current_user: Annotated[User, Depends(get_current_user)]):
-    # Only Admin, Super Admin and Project Manager can view project history
+    # Only Admin, Super Admin, Project Manager, and Team Leader can view project history
     user_roles = [r.name for r in current_user.roles]
-    if not any(role in user_roles for role in ["Super Admin", "Admin", "Project Manager"]):
+    if not any(role in user_roles for role in ["Super Admin", "Admin", "Project Manager", "Team Leader"]):
         raise HTTPException(status_code=403, detail="Not authorized to view project history")
 
     # Verify user has access to the project
@@ -149,11 +143,9 @@ async def get_project_history(project_id: int, db: Annotated[Session, Depends(ge
         raise HTTPException(status_code=404, detail="Project not found")
 
     has_access = False
-    if "Super Admin" in user_roles or "Admin" in user_roles:
+    if "Super Admin" in user_roles:
         has_access = True
-    elif "Project Manager" in user_roles and project.project_manager_id == current_user.id:
-        has_access = True
-    elif "Team Leader" in user_roles and project.team_leader_id == current_user.id:
+    elif cid is None or project.company_id == cid:
         has_access = True
 
     if not has_access:
@@ -182,7 +174,7 @@ def track_project_changes(db: Session, original: Project, updated: Project, user
     tracked_fields = [
         "name", "key", "description", "repository_url", "status",
         "client_name", "start_date", "end_date", "budget", "tech_stack",
-        "project_manager_id", "team_leader_id"
+        "team_id", "project_manager_id", "team_leader_id"
     ]
 
     for field in tracked_fields:
