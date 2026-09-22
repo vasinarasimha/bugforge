@@ -10,6 +10,7 @@ from app.api.routes.teams import router as teams_router
 from app.api.routes.super_admin import router as super_admin_router
 from app.api.routes.company import router as company_router
 from app.api.routes.notifications import router as notifications_router
+from app.api.routes.ai import router as ai_router, qa_router
 
 __all__ = [
     "auth_router",
@@ -24,6 +25,8 @@ __all__ = [
     "super_admin_router",
     "company_router",
     "notifications_router",
+    "ai_router",
+    "qa_router",
 ]
 
 

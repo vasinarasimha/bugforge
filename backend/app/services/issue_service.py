@@ -230,53 +230,78 @@ class IssueService:
 
         created_issue = self.repository.create(db, Issue(**issue_data, reporter_id=user.id, issue_key=issue_key))
 
-        # Notify PM and TL of the project when a defect is created so they can assign developer and QA
-        if is_defect and project:
-            from app.services.notification_service import notification_service
-            recipients = set()
-            team = getattr(project, "team", None)
-            if team:
-                pm_id = getattr(team, "project_manager_id", None)
+        # Check if the created issue is a defect
+        issue_type_str = str(
+            getattr(created_issue, "issue_type", "")
+            or getattr(data, "issue_type", "")
+            or issue_data.get("issue_type", "")
+        ).strip().lower()
+        is_defect = (
+            issue_type_str in ["defect", "bug"]
+            or bool(getattr(created_issue, "is_defect", False))
+            or bool(getattr(data, "is_defect", False))
+        )
+
+        # Explicit guard: non-defect issues must not enter the notification path
+        if is_defect:
+            if not project and getattr(created_issue, "project_id", None):
+                project = ProjectRepository().get(db, created_issue.project_id)
+
+            if project:
+                from app.services.notification_service import notification_service
+                recipients = set()
+
+                # Team-assigned PM and TL
+                team = getattr(project, "team", None)
+                if team:
+                    pm_id = getattr(team, "project_manager_id", None)
+                    if isinstance(pm_id, int) and not isinstance(pm_id, bool):
+                        recipients.add(pm_id)
+                    tl_id = getattr(team, "team_leader_id", None)
+                    if isinstance(tl_id, int) and not isinstance(tl_id, bool):
+                        recipients.add(tl_id)
+
+                # Direct project PM and TL
+                pm_id = getattr(project, "project_manager_id", None)
                 if isinstance(pm_id, int) and not isinstance(pm_id, bool):
                     recipients.add(pm_id)
-                tl_id = getattr(team, "team_leader_id", None)
+                tl_id = getattr(project, "team_leader_id", None)
                 if isinstance(tl_id, int) and not isinstance(tl_id, bool):
                     recipients.add(tl_id)
-            pm_id = getattr(project, "project_manager_id", None)
-            if isinstance(pm_id, int) and not isinstance(pm_id, bool):
-                recipients.add(pm_id)
-            tl_id = getattr(project, "team_leader_id", None)
-            if isinstance(tl_id, int) and not isinstance(tl_id, bool):
-                recipients.add(tl_id)
 
-            comp_id = getattr(created_issue, "company_id", None)
-            if not isinstance(comp_id, int) or isinstance(comp_id, bool):
-                comp_id = getattr(project, "company_id", None)
-            if not isinstance(comp_id, int) or isinstance(comp_id, bool):
-                comp_id = getattr(user, "company_id", 1)
-            if not isinstance(comp_id, int) or isinstance(comp_id, bool):
-                comp_id = 1
+                # Ensure only non-None valid integer recipients
+                recipients = {r for r in recipients if r is not None and isinstance(r, int) and not isinstance(r, bool)}
 
-            proj_name = str(getattr(project, "name", "Project"))
-            issue_title = str(getattr(created_issue, "title", "Defect"))
-            issue_key_str = str(getattr(created_issue, "issue_key", "DEFECT"))
-            issue_id = getattr(created_issue, "id", None)
-            if not isinstance(issue_id, int) or isinstance(issue_id, bool):
-                issue_id = None
+                comp_id = getattr(created_issue, "company_id", None)
+                if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                    comp_id = getattr(project, "company_id", None)
+                if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                    comp_id = getattr(user, "company_id", 1)
+                if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                    comp_id = 1
 
-            for rid in recipients:
-                notification_service.create_notification(
-                    db,
-                    recipient_id=rid,
-                    actor_id=user.id if isinstance(getattr(user, "id", None), int) else None,
-                    company_id=comp_id,
-                    notification_type="DEFECT_CREATED",
-                    title="New Defect Created: Assign Developer & QA",
-                    message=f"New defect '{issue_title}' ({issue_key_str}) created in project '{proj_name}'. Please assign a Developer and QA.",
-                    entity_type="ISSUE",
-                    entity_id=issue_id,
-                    link_url=f"/issues/{issue_id}" if issue_id else None,
-                )
+                proj_name = str(getattr(project, "name", "Project"))
+                issue_title = str(getattr(created_issue, "title", "Defect"))
+                issue_key_str = str(getattr(created_issue, "issue_key", "DEFECT"))
+                issue_id = getattr(created_issue, "id", None)
+                if not isinstance(issue_id, int) or isinstance(issue_id, bool):
+                    issue_id = None
+
+                for rid in recipients:
+                    notification_service.create_notification(
+                        db,
+                        recipient_id=rid,
+                        actor_id=user.id if isinstance(getattr(user, "id", None), int) else None,
+                        company_id=comp_id,
+                        notification_type="DEFECT_CREATED",
+                        title="New Defect Created: Assign Developer & QA",
+                        message=f"New defect '{issue_title}' ({issue_key_str}) created in project '{proj_name}'. Please assign a Developer and QA.",
+                        entity_type="ISSUE",
+                        entity_id=issue_id,
+                        link_url=f"/issues/{issue_id}" if issue_id else None,
+                    )
+        else:
+            return created_issue
 
         return created_issue
 

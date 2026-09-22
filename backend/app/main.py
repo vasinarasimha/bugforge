@@ -28,11 +28,9 @@ from app.api.routes import (
     super_admin_router,
     company_router,
     notifications_router,
+    ai_router,
+    qa_router,
 )
-try:
-    from app.api.routes.ai import router as ai_router
-except ImportError:
-    ai_router = None
 try:
     from app.api.routes.copilot import router as copilot_router, alt_router as alt_copilot_router
 except ImportError:
@@ -120,8 +118,9 @@ app.include_router(issues_router, prefix="/api", tags=["issues"])
 app.include_router(projects_router, prefix="/api", tags=["projects"])
 app.include_router(sprints_router, prefix="/api", tags=["sprints"])
 app.include_router(uploads_router, prefix="/api", tags=["uploads"])
-if ai_router:
-    app.include_router(ai_router, prefix="/api", tags=["ai"])
+app.include_router(ai_router, prefix="/api", tags=["ai"])
+app.include_router(qa_router, prefix="/api", tags=["qa"])
+app.include_router(qa_router, tags=["qa"])
 if copilot_router:
     app.include_router(copilot_router, prefix="/api", tags=["copilot"])
 if alt_copilot_router:

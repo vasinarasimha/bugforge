@@ -81,30 +81,7 @@ class ProjectRepository:
 
 
     def delete(self, db: Session, project: Project) -> None:
-
         print(f"repositories/project_repository.py Soft-deleting project with ID {project.id} from the database")
-
         project.is_active = False
-
-        db.commit()
-
-
-
-    def create(self, db: Session, project: Project) -> Project:
-
-        print(f"repositories/project_repository.py Creating a new project with name '{project.name}' in the database")
-
-        db.add(project); db.commit(); db.refresh(project)
-
-        return self.get(db, project.id)  # type: ignore[return-value]
-
-
-
-    def delete(self, db: Session, project: Project) -> None:
-
-        print(f"repositories/project_repository.py Soft-deleting project with ID {project.id} from the database")
-
-        project.is_active = False
-
         db.commit()
 

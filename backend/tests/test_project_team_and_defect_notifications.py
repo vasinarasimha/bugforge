@@ -120,6 +120,27 @@ def project_team_setup(db_session: Session):
         db_session.add(sev)
         db_session.flush()
 
+    # Project assigned to team
+    proj = db_session.query(Project).filter(Project.company_id == comp.id, Project.key == "TMP1").first()
+    if not proj:
+        proj = Project(
+            name="Team Managed Project TMP1",
+            key="TMP1",
+            description="Project assigned to team",
+            company_id=comp.id,
+            team_id=team.id,
+            project_manager_id=pm_user.id,
+            team_leader_id=tl_user.id,
+            is_active=True,
+        )
+        db_session.add(proj)
+        db_session.flush()
+    else:
+        proj.team_id = team.id
+        proj.project_manager_id = pm_user.id
+        proj.team_leader_id = tl_user.id
+        db_session.flush()
+
     db_session.commit()
 
     return {
@@ -130,6 +151,7 @@ def project_team_setup(db_session: Session):
         "qa": qa_user,
         "reporter": reporter_user,
         "team": team,
+        "project": proj,
         "status_open": st_open,
         "priority": pri,
         "severity": sev,
@@ -213,7 +235,7 @@ def test_defect_creation_notifies_pm_and_tl(project_team_setup, db_session):
     client = TestClient(app)
 
     # First, get the project assigned to the team
-    proj = db_session.query(Project).filter(Project.key == "TMP1").first()
+    proj = data.get("project") or db_session.query(Project).filter(Project.key == "TMP1").first()
     assert proj is not None
 
     # Clear prior notifications for PM and TL to check freshly created ones
@@ -263,7 +285,7 @@ def test_non_defect_does_not_trigger_defect_notification(project_team_setup, db_
     data = project_team_setup
     client = TestClient(app)
 
-    proj = db_session.query(Project).filter(Project.key == "TMP1").first()
+    proj = data.get("project") or db_session.query(Project).filter(Project.key == "TMP1").first()
     assert proj is not None
 
     app.dependency_overrides[get_current_user] = lambda: data["reporter"]
