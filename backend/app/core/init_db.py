@@ -41,6 +41,15 @@ def init_db() -> None:
         except Exception as e:
             print(f"Note: Vector index creation skipped/failed: {e}")
 
+        try:
+            conn.execute(text("""
+                ALTER TABLE projects
+                ADD COLUMN IF NOT EXISTS team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL;
+            """))
+            conn.commit()
+        except Exception as e:
+            print(f"Note: team_id column addition skipped/failed: {e}")
+
     # Seed initial lookup tables, roles, and permissions
     db: Session = SessionLocal()
     try:

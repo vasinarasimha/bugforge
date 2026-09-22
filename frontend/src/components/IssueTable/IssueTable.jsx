@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import TablePagination from '../common/TablePagination'
+import { sortData } from '../../utils/tableSortAndPagination'
 
 const getPriorityColor = (priorityName) => {
   const colors = { Critical: '#ef4444', High: '#f97316', Medium: '#f59e0b', Low: '#10b981' };
@@ -62,17 +64,70 @@ export const isClientFeatureRequest = (issue) => {
   )
 }
 
+const issueColumnConfigs = {
+  issue_key: {
+    type: 'alphanumeric',
+    accessor: (i) => i.issue_key || '',
+  },
+  title: {
+    type: 'text',
+    accessor: (i) => i.title || '',
+  },
+  project_name: {
+    type: 'text',
+    accessor: (i) => i.project_name || '',
+  },
+  assignee: {
+    type: 'text',
+    accessor: (i) => i.assignee || '',
+  },
+  assigned_qa_name: {
+    type: 'text',
+    accessor: (i) => i.assigned_qa_name || i.assigned_qa?.full_name || '',
+  },
+  priority: {
+    type: 'priority',
+    accessor: (i) => i.priority_name || (typeof i.priority === 'string' ? i.priority : i.priority?.name) || '',
+  },
+  status: {
+    type: 'issue_status',
+    accessor: (i) => i.status_name || (typeof i.status === 'string' ? i.status : i.status?.name) || '',
+  },
+  created_at: {
+    type: 'date',
+    accessor: (i) => i.created_at || '',
+  },
+}
+
 export default function IssueTable({ issues = [], onEdit, onDelete, canEdit = true, canDelete = true, onView, onAssignTeam }) {
   const [currentPage, setCurrentPage] = useState(1)
+  const [sortKey, setSortKey] = useState(null)
+  const [sortDirection, setSortDirection] = useState('asc')
   const itemsPerPage = 10
 
-  const totalPages = Math.ceil(issues.length / itemsPerPage)
-  const startIndex = (currentPage - 1) * itemsPerPage
-  const paginatedIssues = issues.slice(startIndex, startIndex + itemsPerPage)
-
-  const goToPage = (page) => {
-    if (page >= 1 && page <= totalPages) setCurrentPage(page)
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDirection('asc')
+    }
   }
+
+  const sortedIssues = useMemo(() => {
+    return sortData(issues, sortKey, sortDirection, issueColumnConfigs)
+  }, [issues, sortKey, sortDirection])
+
+  const totalPages = Math.ceil(sortedIssues.length / itemsPerPage)
+  const safeCurrentPage = totalPages > 0 ? Math.min(Math.max(1, currentPage), totalPages) : 1
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage
+  const paginatedIssues = sortedIssues.slice(startIndex, startIndex + itemsPerPage)
+
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [totalPages, currentPage])
 
   return (
     <>
@@ -210,20 +265,145 @@ export default function IssueTable({ issues = [], onEdit, onDelete, canEdit = tr
           font-size: 0.78rem;
           font-weight: 500;
         }
+        .issue-table th.sortable-header {
+          cursor: pointer;
+          user-select: none;
+          white-space: nowrap;
+        }
+        .issue-table th.sortable-header:hover {
+          background-color: rgba(0, 0, 0, 0.05);
+        }
+        .issue-table th.sortable-header .sort-icon {
+          display: inline-block;
+          margin-left: 6px;
+          font-weight: 700;
+        }
       `}</style>
 
       <div className="table-responsive">
         <table className="table table-hover align-middle issue-table">
           <thead>
             <tr>
-              <th>Issue Key</th>
-              <th>Title</th>
-              <th>Project</th>
-              <th>Assigned Developer</th>
-              <th>Assigned QA</th>
-              <th>Priority</th>
-              <th>Status</th>
-              <th>Created</th>
+              <th
+                role="button"
+                tabIndex={0}
+                className="sortable-header"
+                onClick={() => handleSort('issue_key')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort('issue_key'); } }}
+                aria-sort={sortKey === 'issue_key' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                Issue Key
+                {sortKey === 'issue_key' && (
+                  <span className="sort-icon" aria-hidden="true">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </th>
+              <th
+                role="button"
+                tabIndex={0}
+                className="sortable-header"
+                onClick={() => handleSort('title')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort('title'); } }}
+                aria-sort={sortKey === 'title' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                Title
+                {sortKey === 'title' && (
+                  <span className="sort-icon" aria-hidden="true">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </th>
+              <th
+                role="button"
+                tabIndex={0}
+                className="sortable-header"
+                onClick={() => handleSort('project_name')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort('project_name'); } }}
+                aria-sort={sortKey === 'project_name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                Project
+                {sortKey === 'project_name' && (
+                  <span className="sort-icon" aria-hidden="true">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </th>
+              <th
+                role="button"
+                tabIndex={0}
+                className="sortable-header"
+                onClick={() => handleSort('assignee')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort('assignee'); } }}
+                aria-sort={sortKey === 'assignee' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                Assigned Developer
+                {sortKey === 'assignee' && (
+                  <span className="sort-icon" aria-hidden="true">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </th>
+              <th
+                role="button"
+                tabIndex={0}
+                className="sortable-header"
+                onClick={() => handleSort('assigned_qa_name')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort('assigned_qa_name'); } }}
+                aria-sort={sortKey === 'assigned_qa_name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                Assigned QA
+                {sortKey === 'assigned_qa_name' && (
+                  <span className="sort-icon" aria-hidden="true">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </th>
+              <th
+                role="button"
+                tabIndex={0}
+                className="sortable-header"
+                onClick={() => handleSort('priority')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort('priority'); } }}
+                aria-sort={sortKey === 'priority' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                Priority
+                {sortKey === 'priority' && (
+                  <span className="sort-icon" aria-hidden="true">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </th>
+              <th
+                role="button"
+                tabIndex={0}
+                className="sortable-header"
+                onClick={() => handleSort('status')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort('status'); } }}
+                aria-sort={sortKey === 'status' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                Status
+                {sortKey === 'status' && (
+                  <span className="sort-icon" aria-hidden="true">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </th>
+              <th
+                role="button"
+                tabIndex={0}
+                className="sortable-header"
+                onClick={() => handleSort('created_at')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort('created_at'); } }}
+                aria-sort={sortKey === 'created_at' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+              >
+                Created
+                {sortKey === 'created_at' && (
+                  <span className="sort-icon" aria-hidden="true">
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+              </th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -283,17 +463,15 @@ export default function IssueTable({ issues = [], onEdit, onDelete, canEdit = tr
                           <i className="bi bi-building me-1" />{issue.requesting_company_name}
                         </span>
                       )}
-                      {(isFeature || isClientFeature || isBugForgeProject) && (
-                        issue.team_name ? (
-                          <span className="badge px-2 py-0.5 rounded-pill" style={{ fontSize: '0.68rem', backgroundColor: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe' }}>
-                            <i className="bi bi-diagram-3-fill me-1" />{issue.team_name}
-                          </span>
-                        ) : (
-                          <span className="badge px-2 py-0.5 rounded-pill" style={{ fontSize: '0.68rem', backgroundColor: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
-                            <i className="bi bi-exclamation-circle me-1" />No Squad
-                          </span>
-                        )
-                      )}
+                      {issue.team_name ? (
+                        <span className="badge px-2 py-0.5 rounded-pill" style={{ fontSize: '0.68rem', backgroundColor: '#e0e7ff', color: '#3730a3', border: '1px solid #c7d2fe' }}>
+                          <i className="bi bi-diagram-3-fill me-1" />{issue.team_name}
+                        </span>
+                      ) : (isFeature || isClientFeature) ? (
+                        <span className="badge px-2 py-0.5 rounded-pill" style={{ fontSize: '0.68rem', backgroundColor: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
+                          <i className="bi bi-exclamation-circle me-1" />No Squad
+                        </span>
+                      ) : null}
                     </div>
                   </td>
                   <td>{issue.project_name || '—'}</td>
@@ -336,7 +514,7 @@ export default function IssueTable({ issues = [], onEdit, onDelete, canEdit = tr
                   </td>
                   <td>
                     <div className="d-flex gap-1 align-items-center">
-                      {onAssignTeam && (isFeature || isClientFeature || isBugForgeProject) && (
+                      {onAssignTeam && (isFeature || isClientFeature) && !isDefect && (
                         <button
                           type="button"
                           className="btn btn-outline-primary btn-sm border d-inline-flex align-items-center gap-1"
@@ -366,34 +544,20 @@ export default function IssueTable({ issues = [], onEdit, onDelete, canEdit = tr
                 </tr>
               )
             }) : (
-              <tr><td colSpan="8" className="text-center text-muted py-4">No issues found.</td></tr>
+              <tr><td colSpan="9" className="text-center text-muted py-4">No issues found.</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {totalPages > 1 && (
-        <div className="d-flex justify-content-between align-items-center mt-3">
-          <span className="text-muted" style={{ fontSize: '0.9rem' }}>
-            Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, issues.length)} of {issues.length} entries
-          </span>
-          <nav aria-label="Page navigation">
-            <ul className="pagination pagination-sm mb-0">
-              <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
-                <button className="page-link" onClick={() => goToPage(currentPage - 1)}>Previous</button>
-              </li>
-              {[...Array(totalPages)].map((_, i) => (
-                <li key={i} className={`page-item ${currentPage === i + 1 ? 'active' : ''}`}>
-                  <button className="page-link" onClick={() => goToPage(i + 1)}>{i + 1}</button>
-                </li>
-              ))}
-              <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
-                <button className="page-link" onClick={() => goToPage(currentPage + 1)}>Next</button>
-              </li>
-            </ul>
-          </nav>
-        </div>
-      )}
+      <TablePagination
+        currentPage={safeCurrentPage}
+        totalPages={totalPages}
+        totalItems={sortedIssues.length}
+        startIndex={startIndex}
+        itemsPerPage={itemsPerPage}
+        onPageChange={setCurrentPage}
+      />
     </>
   )
 }

@@ -21,6 +21,7 @@ from app.schemas.qa import (
 )
 
 router = APIRouter(prefix="/ai")
+qa_router = APIRouter(prefix="/qa")
 router.include_router(troubleshooting_router)
 
 class FormatIssueRequest(BaseModel):
@@ -200,6 +201,8 @@ QA_ALLOWED_ROLES = ["Admin", "Project Manager", "Team Leader", "QA", "PM", "TL"]
 
 
 @router.post("/test-cases", response_model=TestCaseGenerationResponse)
+@qa_router.post("/test-cases", response_model=TestCaseGenerationResponse)
+@qa_router.post("", response_model=TestCaseGenerationResponse)
 async def generate_test_cases(
     req: GenerateTestCasesRequest,
     current_user: Annotated[User, Depends(require_role(QA_ALLOWED_ROLES))],
@@ -220,6 +223,7 @@ async def generate_test_cases(
 
 
 @router.post("/missing-scenarios", response_model=MissingScenariosResponse)
+@qa_router.post("/missing-scenarios", response_model=MissingScenariosResponse)
 async def detect_missing_scenarios(
     req: MissingScenariosRequest,
     current_user: Annotated[User, Depends(require_role(QA_ALLOWED_ROLES))],

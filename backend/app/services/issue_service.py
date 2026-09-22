@@ -201,6 +201,17 @@ class IssueService:
 
         issue_key = self._generate_next_issue_key(db, project.key)
 
+        # Directly assign squad for BugForge project defects reported by BugForge employees
+        bf_comp = self._get_or_create_bugforge_company(db)
+        is_bf_project = bool(project and (project.company_id == bf_comp.id or project.key == "BF" or (getattr(project, 'name', '') and project.name.lower() == "bugforge")))
+        is_bf_employee = bool(user.company_id == bf_comp.id or (getattr(user, 'company', None) and getattr(user.company, 'name', '').lower() == "bugforge") or (not user.company_id and is_super_admin))
+        is_defect = bool(data.issue_type in ["Defect", "Bug"] or issue_data.get("issue_type") in ["Defect", "Bug"])
+
+        if is_bf_project and is_bf_employee and is_defect and not issue_data.get('team_id'):
+            user_team = self._get_user_team(db, user, bf_comp.id)
+            if user_team:
+                issue_data['team_id'] = user_team.id
+
         # Resolve category/module names for richer embedding
         category_name, module_name = self._resolve_names_for_embedding(
             db, issue_data.get('category_id'), issue_data.get('module_id')
@@ -217,7 +228,82 @@ class IssueService:
         if embedding is not None:
             issue_data['embedding_vector'] = embedding
 
-        return self.repository.create(db, Issue(**issue_data, reporter_id=user.id, issue_key=issue_key))
+        created_issue = self.repository.create(db, Issue(**issue_data, reporter_id=user.id, issue_key=issue_key))
+
+        # Check if the created issue is a defect
+        issue_type_str = str(
+            getattr(created_issue, "issue_type", "")
+            or getattr(data, "issue_type", "")
+            or issue_data.get("issue_type", "")
+        ).strip().lower()
+        is_defect = (
+            issue_type_str in ["defect", "bug"]
+            or bool(getattr(created_issue, "is_defect", False))
+            or bool(getattr(data, "is_defect", False))
+        )
+
+        # Explicit guard: non-defect issues must not enter the notification path
+        if is_defect:
+            if not project and getattr(created_issue, "project_id", None):
+                project = ProjectRepository().get(db, created_issue.project_id)
+
+            if project:
+                from app.services.notification_service import notification_service
+                recipients = set()
+
+                # Team-assigned PM and TL
+                team = getattr(project, "team", None)
+                if team:
+                    pm_id = getattr(team, "project_manager_id", None)
+                    if isinstance(pm_id, int) and not isinstance(pm_id, bool):
+                        recipients.add(pm_id)
+                    tl_id = getattr(team, "team_leader_id", None)
+                    if isinstance(tl_id, int) and not isinstance(tl_id, bool):
+                        recipients.add(tl_id)
+
+                # Direct project PM and TL
+                pm_id = getattr(project, "project_manager_id", None)
+                if isinstance(pm_id, int) and not isinstance(pm_id, bool):
+                    recipients.add(pm_id)
+                tl_id = getattr(project, "team_leader_id", None)
+                if isinstance(tl_id, int) and not isinstance(tl_id, bool):
+                    recipients.add(tl_id)
+
+                # Ensure only non-None valid integer recipients
+                recipients = {r for r in recipients if r is not None and isinstance(r, int) and not isinstance(r, bool)}
+
+                comp_id = getattr(created_issue, "company_id", None)
+                if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                    comp_id = getattr(project, "company_id", None)
+                if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                    comp_id = getattr(user, "company_id", 1)
+                if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                    comp_id = 1
+
+                proj_name = str(getattr(project, "name", "Project"))
+                issue_title = str(getattr(created_issue, "title", "Defect"))
+                issue_key_str = str(getattr(created_issue, "issue_key", "DEFECT"))
+                issue_id = getattr(created_issue, "id", None)
+                if not isinstance(issue_id, int) or isinstance(issue_id, bool):
+                    issue_id = None
+
+                for rid in recipients:
+                    notification_service.create_notification(
+                        db,
+                        recipient_id=rid,
+                        actor_id=user.id if isinstance(getattr(user, "id", None), int) else None,
+                        company_id=comp_id,
+                        notification_type="DEFECT_CREATED",
+                        title="New Defect Created: Assign Developer & QA",
+                        message=f"New defect '{issue_title}' ({issue_key_str}) created in project '{proj_name}'. Please assign a Developer and QA.",
+                        entity_type="ISSUE",
+                        entity_id=issue_id,
+                        link_url=f"/issues/{issue_id}" if issue_id else None,
+                    )
+        else:
+            return created_issue
+
+        return created_issue
 
     def update(self, db: Session, issue_id: int, data: IssueUpdate, user: User):
         issue = self.get(db, issue_id, company_id=user.company_id)
@@ -835,6 +921,21 @@ class IssueService:
             db.commit()
             db.refresh(proj)
         return proj
+
+    def _get_user_team(self, db: Session, user: User, company_id: int | None = None):
+        from app.models.team import Team, TeamMember
+        from sqlalchemy import or_
+        query = db.query(Team).outerjoin(Team.members).filter(Team.is_active == True)
+        if company_id is not None:
+            query = query.filter(Team.company_id == company_id)
+        query = query.filter(
+            or_(
+                TeamMember.user_id == user.id,
+                Team.team_leader_id == user.id,
+                Team.project_manager_id == user.id,
+            )
+        )
+        return query.first()
 
     def submit_feature_request(
         self,

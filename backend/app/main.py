@@ -28,11 +28,9 @@ from app.api.routes import (
     super_admin_router,
     company_router,
     notifications_router,
+    ai_router,
+    qa_router,
 )
-try:
-    from app.api.routes.ai import router as ai_router
-except ImportError:
-    ai_router = None
 try:
     from app.api.routes.copilot import router as copilot_router, alt_router as alt_copilot_router
 except ImportError:
@@ -61,6 +59,22 @@ async def daily_read_notifications_cleanup_loop():
             logger.error(f"Error during automated daily notification cleanup: {e}", exc_info=True)
         # Sleep for 24 hours (86400 seconds)
         await asyncio.sleep(86400)
+
+
+def ensure_schema_migrations():
+    """Ensure newly added columns exist in database tables."""
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                ALTER TABLE projects
+                ADD COLUMN IF NOT EXISTS team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL;
+            """))
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Schema migration check skipped/failed: {e}")
+
+ensure_schema_migrations()
 
 
 @asynccontextmanager
@@ -104,8 +118,9 @@ app.include_router(issues_router, prefix="/api", tags=["issues"])
 app.include_router(projects_router, prefix="/api", tags=["projects"])
 app.include_router(sprints_router, prefix="/api", tags=["sprints"])
 app.include_router(uploads_router, prefix="/api", tags=["uploads"])
-if ai_router:
-    app.include_router(ai_router, prefix="/api", tags=["ai"])
+app.include_router(ai_router, prefix="/api", tags=["ai"])
+app.include_router(qa_router, prefix="/api", tags=["qa"])
+app.include_router(qa_router, tags=["qa"])
 if copilot_router:
     app.include_router(copilot_router, prefix="/api", tags=["copilot"])
 if alt_copilot_router:

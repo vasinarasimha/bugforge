@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.label import IssueLabel
     from app.models.sprint import Sprint
     from app.models.company import Company
+    from app.models.team import Team
 
 
 class Project(Base):
@@ -32,6 +33,7 @@ class Project(Base):
     budget: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tech_stack: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
     project_manager_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     team_leader_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     company_id: Mapped[int] = mapped_column(
@@ -43,6 +45,7 @@ class Project(Base):
 
     company: Mapped["Company"] = relationship(back_populates="projects")
     creator: Mapped["User"] = relationship(back_populates="projects", foreign_keys=[created_by])
+    team: Mapped["Team | None"] = relationship(foreign_keys=[team_id])
     project_manager: Mapped["User | None"] = relationship(foreign_keys=[project_manager_id])
     team_leader: Mapped["User | None"] = relationship(foreign_keys=[team_leader_id])
     issues: Mapped[list["Issue"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -55,12 +58,24 @@ class Project(Base):
         return self.creator.full_name if self.creator else "Unknown"
 
     @property
+    def team_name(self) -> str | None:
+        return self.team.name if self.team else None
+
+    @property
     def project_manager_name(self) -> str | None:
-        return self.project_manager.full_name if self.project_manager else None
+        if self.project_manager:
+            return self.project_manager.full_name
+        if self.team and self.team.project_manager:
+            return self.team.project_manager.full_name
+        return None
 
     @property
     def team_leader_name(self) -> str | None:
-        return self.team_leader.full_name if self.team_leader else None
+        if self.team_leader:
+            return self.team_leader.full_name
+        if self.team and self.team.team_leader:
+            return self.team.team_leader.full_name
+        return None
 
 class ProjectMember(Base):
     __tablename__ = "project_members"
