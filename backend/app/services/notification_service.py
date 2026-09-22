@@ -30,6 +30,22 @@ class NotificationService:
         Create a persistent notification for a user.
         Deduplicates if an identical unread notification for the same entity was created recently (within 5 minutes).
         """
+        if not isinstance(recipient_id, int) or isinstance(recipient_id, bool):
+            logger.warning("Attempted to create notification with non-integer recipient_id: %r", recipient_id)
+            return None
+        if not isinstance(company_id, int) or isinstance(company_id, bool):
+            logger.warning("Attempted to create notification with non-integer company_id: %r", company_id)
+            return None
+
+        if actor_id is not None and (not isinstance(actor_id, int) or isinstance(actor_id, bool)):
+            actor_id = None
+        if entity_id is not None and (not isinstance(entity_id, int) or isinstance(entity_id, bool)):
+            entity_id = None
+        if not isinstance(title, str):
+            title = str(title)
+        if not isinstance(message, str):
+            message = str(message)
+
         # Deduplication check: same recipient, type, entity, within last 5 minutes
         recent_threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
         existing = (

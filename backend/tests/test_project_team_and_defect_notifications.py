@@ -1,6 +1,7 @@
 """
 Tests for Project Team Assignment, PM/TL Project Access, and Defect Creation Notifications.
 """
+import uuid
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -142,9 +143,10 @@ def test_create_project_with_team_id(project_team_setup, db_session):
 
     app.dependency_overrides[get_current_user] = lambda: data["admin"]
 
+    k = f"T{uuid.uuid4().hex[:3].upper()}"
     resp = client.post("/api/projects", json={
-        "name": "Team Managed Project",
-        "key": "TMP1",
+        "name": f"Team Managed Project {k}",
+        "key": k,
         "description": "Project assigned to team",
         "team_id": data["team"].id,
     })
@@ -165,9 +167,10 @@ def test_pm_and_tl_access_all_projects(project_team_setup, db_session):
 
     # 1. Admin creates another unassigned project
     app.dependency_overrides[get_current_user] = lambda: data["admin"]
+    gk = f"G{uuid.uuid4().hex[:3].upper()}"
     resp = client.post("/api/projects", json={
-        "name": "General Project Unassigned",
-        "key": "GPU1",
+        "name": f"General Project {gk}",
+        "key": gk,
         "description": "Project without explicit PM or TL",
     })
     assert resp.status_code == 201

@@ -455,14 +455,20 @@ def test_confirm_and_create_issue(mock_hf, mock_auth, sample_payload):
         mock_proj = MagicMock()
         mock_proj.id = 1
         mock_proj.key = "TEST"
+        mock_proj.name = "Test Project"
         mock_proj.company_id = 1
         mock_proj.lead_id = 1
+        mock_proj.team = MagicMock(project_manager_id=1, team_leader_id=1)
+        mock_proj.project_manager_id = 1
+        mock_proj.team_leader_id = 1
         mock_proj.members = []
         MockProjectRepo.return_value.get.return_value = mock_proj
 
         mock_created_issue = MagicMock()
         mock_created_issue.id = 42
         mock_created_issue.issue_key = "TEST-42"
+        mock_created_issue.title = "Custom confirmed title"
+        mock_created_issue.company_id = 1
         mock_created_issue.embedding_vector = None
         mock_created_issue.project_id = 1
         MockIssueRepo.return_value.create.return_value = mock_created_issue

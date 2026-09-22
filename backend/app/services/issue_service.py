@@ -234,29 +234,48 @@ class IssueService:
         if is_defect and project:
             from app.services.notification_service import notification_service
             recipients = set()
-            if getattr(project, "team", None):
-                if project.team.project_manager_id:
-                    recipients.add(project.team.project_manager_id)
-                if project.team.team_leader_id:
-                    recipients.add(project.team.team_leader_id)
-            if getattr(project, "project_manager_id", None):
-                recipients.add(project.project_manager_id)
-            if getattr(project, "team_leader_id", None):
-                recipients.add(project.team_leader_id)
+            team = getattr(project, "team", None)
+            if team:
+                pm_id = getattr(team, "project_manager_id", None)
+                if isinstance(pm_id, int) and not isinstance(pm_id, bool):
+                    recipients.add(pm_id)
+                tl_id = getattr(team, "team_leader_id", None)
+                if isinstance(tl_id, int) and not isinstance(tl_id, bool):
+                    recipients.add(tl_id)
+            pm_id = getattr(project, "project_manager_id", None)
+            if isinstance(pm_id, int) and not isinstance(pm_id, bool):
+                recipients.add(pm_id)
+            tl_id = getattr(project, "team_leader_id", None)
+            if isinstance(tl_id, int) and not isinstance(tl_id, bool):
+                recipients.add(tl_id)
 
-            proj_name = getattr(project, "name", "Project")
+            comp_id = getattr(created_issue, "company_id", None)
+            if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                comp_id = getattr(project, "company_id", None)
+            if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                comp_id = getattr(user, "company_id", 1)
+            if not isinstance(comp_id, int) or isinstance(comp_id, bool):
+                comp_id = 1
+
+            proj_name = str(getattr(project, "name", "Project"))
+            issue_title = str(getattr(created_issue, "title", "Defect"))
+            issue_key_str = str(getattr(created_issue, "issue_key", "DEFECT"))
+            issue_id = getattr(created_issue, "id", None)
+            if not isinstance(issue_id, int) or isinstance(issue_id, bool):
+                issue_id = None
+
             for rid in recipients:
                 notification_service.create_notification(
                     db,
                     recipient_id=rid,
-                    actor_id=user.id,
-                    company_id=created_issue.company_id,
+                    actor_id=user.id if isinstance(getattr(user, "id", None), int) else None,
+                    company_id=comp_id,
                     notification_type="DEFECT_CREATED",
                     title="New Defect Created: Assign Developer & QA",
-                    message=f"New defect '{created_issue.title}' ({created_issue.issue_key}) created in project '{proj_name}'. Please assign a Developer and QA.",
+                    message=f"New defect '{issue_title}' ({issue_key_str}) created in project '{proj_name}'. Please assign a Developer and QA.",
                     entity_type="ISSUE",
-                    entity_id=created_issue.id,
-                    link_url=f"/issues/{created_issue.id}",
+                    entity_id=issue_id,
+                    link_url=f"/issues/{issue_id}" if issue_id else None,
                 )
 
         return created_issue
